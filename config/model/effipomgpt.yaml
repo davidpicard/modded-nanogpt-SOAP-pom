@@ -1,0 +1,11 @@
+defaults:
+ - mixing_layer: effipom
+ - _self_
+ - gpt: d12
+
+vocab_size: 50257
+n_layer: 12
+n_head: 12
+degree: 2
+expand: 2
+n_embd: 768 
