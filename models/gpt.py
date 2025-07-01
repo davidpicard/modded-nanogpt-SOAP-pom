@@ -3,6 +3,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 import models.pom as pom
 import models.effipom as effipom
+import math
+from copy import deepcopy
 
 
 def rmsnorm(x0, eps=1e-6):
@@ -146,6 +148,23 @@ class Block(nn.Module):
     def __init__(self, mixing_layer, n_embd, n_layer):
         super().__init__()
         self.attn = mixing_layer #CausalSelfPoM(n_embd, degree, expand, n_head)
+        self.attn = deepcopy(mixing_layer) #CausalSelfPoM(n_embd, degree, expand, n_head)
+        # Reinitialize with pytorch defaults
+        for module in self.modules():
+            if isinstance(module, nn.Linear):
+                nn.init.kaiming_uniform_(module.weight, a=math.sqrt(5))
+                if module.bias is not None:
+                    fan_in, _ = nn.init._calculate_fan_in_and_fan_out(module.weight)
+                    bound = 1 / math.sqrt(fan_in) if fan_in > 0 else 0
+                    nn.init.uniform_(module.bias, -bound, bound)
+            elif isinstance(module, nn.Conv1d):
+                nn.init.kaiming_uniform_(module.weight, a=math.sqrt(5))
+                if module.bias is not None:
+                    fan_in, _ = nn.init._calculate_fan_in_and_fan_out(module.weight)
+                    bound = 1 / math.sqrt(fan_in) if fan_in > 0 else 0
+                    nn.init.uniform_(module.bias, -bound, bound)
+            elif isinstance(module, nn.Embedding):
+                nn.init.normal_(module.weight, mean=0, std=1)
         self.mlp = MLP(n_embd)
         self.attn_scale = (1 / (2 * n_layer)**0.5)
 
