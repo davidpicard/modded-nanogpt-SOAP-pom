@@ -142,7 +142,7 @@ def polynomial_aggregation_(x: torch.Tensor, coeff: torch.Tensor, k: int, mask: 
     return h
 
 @torch.compile
-def polynomial_selection_(x: torch.Tensor, h: torch.Tensor) -> torch.Tensor:
+def polynomial_selection_(x: torch.Tensor, h: torch.Tensor, n_head: int) -> torch.Tensor:
     """
     Apply polynomial selection with sigmoid gating.
     
@@ -153,13 +153,13 @@ def polynomial_selection_(x: torch.Tensor, h: torch.Tensor) -> torch.Tensor:
     Returns:
         Gated output tensor
     """
-    return F.sigmoid(x) * h
+    return F.sigmoid(x).repeat_interleave(n_head, dim=-1, output_size=h.shape[-1]) * h
 
 # =============================================================================
 # Main PoM Function
 # =============================================================================
 
-def pom(xq: torch.Tensor, xc: torch.Tensor, coeff: torch.Tensor, k: int, mask: Optional[torch.Tensor] = None) -> torch.Tensor:
+def pom(xq: torch.Tensor, xc: torch.Tensor, coeff: torch.Tensor, k: int, n_head:int, mask: Optional[torch.Tensor] = None) -> torch.Tensor:
     """
     Polynomial Mixer (PoM) operation.
     
@@ -177,7 +177,7 @@ def pom(xq: torch.Tensor, xc: torch.Tensor, coeff: torch.Tensor, k: int, mask: O
         Output tensor after polynomial mixing
     """
     h = polynomial_aggregation_(xc, coeff, k, mask)
-    o = polynomial_selection_(xq, h)
+    o = polynomial_selection_(xq, h, n_head)
     return o
 
 # =============================================================================
@@ -202,7 +202,7 @@ class EffiPoM(nn.Module):
         pom (callable): The polynomial mixer operation function
     """
     
-    def __init__(self, dim: int, degree: int, expand: int, bias: bool = True):
+    def __init__(self, dim: int, degree: int, expand: int, n_head: int, bias: bool = True):
         """
         Initialize the PoM module.
         
@@ -216,11 +216,14 @@ class EffiPoM(nn.Module):
         self.dim = dim
         self.order = degree
         self.order_expand = expand
+        self.n_head = n_head
+        assert dim % n_head == 0, "dim must be divisible by n_head for group conv"
+        self.head_dim = dim * expand // n_head
 
         # Linear projections
-        self.po_proj = nn.Linear(dim, expand * dim, bias=bias)
+        self.po_proj = nn.Conv1d(dim, expand * dim, kernel_size=1, bias=bias, groups=self.n_head)
         self.po_coeff = nn.Parameter(torch.randn(dim * expand, degree))
-        self.se_proj = nn.Linear(dim, expand * dim, bias=bias)
+        self.se_proj = nn.Linear(dim, self.head_dim, bias=bias)
         self.ag_proj = nn.Linear(expand * dim, dim, bias=bias)
         self.pom = pom
 
@@ -241,8 +244,8 @@ class EffiPoM(nn.Module):
             xc = xq  # self-attention
 
         s = self.se_proj(xq)
-        h = self.po_proj(xc)
-        sh = self.pom(s, h, self.po_coeff, self.order, mask)
+        h = self.po_proj(xc.transpose(1, 2)).transpose(1, 2)
+        sh = self.pom(s, h, self.po_coeff, self.order, self.n_head, mask)
 
         return self.ag_proj(sh)
 
@@ -277,5 +280,5 @@ class EffiPoM(nn.Module):
 
         new_state = {'h': h, 'n': n_past + n_current}
 
-        sh = polynomial_selection_(s, h)
+        sh = polynomial_selection_(s, h, self.n_head)
         return self.ag_proj(sh), new_state

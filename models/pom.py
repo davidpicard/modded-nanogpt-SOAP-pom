@@ -151,7 +151,7 @@ def polynomial_selection_(x: torch.Tensor, h: torch.Tensor, n_head: int) -> torc
     Returns:
         Gated output tensor
     """
-    return F.sigmoid(x).repeat_interleave(n_head, dim=-1) * h
+    return F.sigmoid(x).repeat_interleave(n_head, dim=-1, output_size=h.shape[-1]) * h
 
 # =============================================================================
 # Main PoM Function
