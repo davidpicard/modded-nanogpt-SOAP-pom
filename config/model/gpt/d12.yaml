@@ -2,7 +2,7 @@
 
 model:
   n_layer: 12
-  n_head: 12
+  n_head: 1
   n_embd: 768
 
   gpt:
