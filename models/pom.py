@@ -3,7 +3,6 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch._dynamo
 from typing import Optional, Tuple, Dict, Any
-import einops
 
 torch._dynamo.config.suppress_errors = True
 
@@ -151,7 +150,11 @@ def polynomial_selection_(x: torch.Tensor, h: torch.Tensor, n_head: int) -> torc
     Returns:
         Gated output tensor
     """
-    return F.sigmoid(x).repeat_interleave(n_head, dim=-1, output_size=h.shape[-1]) * h
+    s = F.sigmoid(x).unsqueeze(-1)
+    orig_shape = h.shape
+    new_shape = (*h.shape[:-1], n_head, h.shape[-1] // n_head)
+    h = h.view(new_shape)
+    return (s * h).view(orig_shape)
 
 # =============================================================================
 # Main PoM Function
@@ -215,11 +218,10 @@ class PoM(nn.Module):
         self.order_expand = expand
         self.n_head = n_head
         assert dim % n_head == 0, "dim must be divisible by n_head for group conv"
-        self.head_dim = dim * degree * expand // n_head
         
         # Linear projections
-        self.po_proj = nn.Conv1d(dim, degree * expand * dim, kernel_size=1, bias=bias, groups=self.n_head)
-        self.se_proj = nn.Linear(dim, self.head_dim, bias=bias)
+        self.po_proj = nn.Conv1d(dim, degree * expand * dim, kernel_size=1, bias=bias, groups=n_head)
+        self.se_proj = nn.Linear(dim, n_head, bias=bias)
         self.ag_proj = nn.Linear(degree * expand * dim, dim, bias=bias)
         self.pom = pom
 
@@ -276,5 +278,5 @@ class PoM(nn.Module):
 
         new_state = {'h': h, 'n': n_past + n_current}
 
-        sh = polynomial_selection_(s, h)
+        sh = polynomial_selection_(s, h, self.n_head)
         return self.ag_proj(sh), new_state
