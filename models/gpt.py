@@ -70,7 +70,24 @@ class CausalSelfPoM(nn.Module):
         self.n_head = n_head
         self.n_embd = n_embd
         self.head_dim = self.n_embd // self.n_head
-        self.pom = pom.PoM(self.n_embd, self.degree, self.expand, False)
+        self.pom = pom.PoM(self.n_embd, self.degree, self.expand, self.n_head, False)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        B, T, C = x.size()
+        mask = torch.tril(torch.ones((T, T))).unsqueeze(0)
+        return self.pom(x, x, mask)
+
+class CausalSelfEffiPoM(nn.Module):
+    """Causal self-attention using efficient Polynomial Mixer."""
+    
+    def __init__(self, n_embd, degree, expand, n_head):
+        super().__init__()
+        self.degree = degree
+        self.expand = expand
+        self.n_head = n_head
+        self.n_embd = n_embd
+        self.head_dim = self.n_embd // self.n_head
+        self.pom = effipom.EffiPoM(self.n_embd, self.degree, self.expand, self.n_head, False)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         B, T, C = x.size()
@@ -147,7 +164,6 @@ class Block(nn.Module):
     
     def __init__(self, mixing_layer, n_embd, n_layer):
         super().__init__()
-        self.attn = mixing_layer #CausalSelfPoM(n_embd, degree, expand, n_head)
         self.attn = deepcopy(mixing_layer) #CausalSelfPoM(n_embd, degree, expand, n_head)
         # Reinitialize with pytorch defaults
         for module in self.modules():

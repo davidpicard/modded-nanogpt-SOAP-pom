@@ -1,0 +1,13 @@
+# @package _global_
+
+defaults:
+  - override /model: pomgpt
+
+model:
+  n_head: 32
+
+training:
+  batch_size: 48
+  accumulation: 8
+
+experiment_name: pomgpt_multihead_${model.n_head}_heads

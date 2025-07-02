@@ -17,7 +17,7 @@ from rich.progress import Progress, TextColumn, BarColumn, TimeElapsedColumn, Ti
 from rich.console import Console
 from rich.text import Text
 from torchinfo import summary
-
+from count_params import count_parameters
 from data import DistributedDataLoader
 
 # Set float32 matmul precision to match reference implementation
@@ -124,6 +124,17 @@ def main(cfg: DictConfig):
     model = instantiate(cfg.model.gpt)
     model = model.cuda()
     
+    # Count and display model parameters
+    total_params, trainable_params = count_parameters(model, print_breakdown=True)
+    
+    # Log parameter counts to wandb
+    if master_process:
+        wandb.log({
+            "model/total_parameters": total_params,
+            "model/trainable_parameters": trainable_params,
+            "model/memory_mb_fp32": total_params * 4 / 1024**2,
+            "model/memory_mb_bf16": total_params * 2 / 1024**2
+        })
     
     if hasattr(config, "coordinate_descent_tuning"):
         config.coordinate_descent_tuning = True  # suggested by @Chillee

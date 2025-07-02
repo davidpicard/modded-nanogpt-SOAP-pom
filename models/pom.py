@@ -3,6 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch._dynamo
 from typing import Optional, Tuple, Dict, Any
+import einops
 
 torch._dynamo.config.suppress_errors = True
 
@@ -139,7 +140,7 @@ def polynomial_aggregation_(x: torch.Tensor, k: int, mask: Optional[torch.Tensor
     return h
 
 @torch.compile
-def polynomial_selection_(x: torch.Tensor, h: torch.Tensor) -> torch.Tensor:
+def polynomial_selection_(x: torch.Tensor, h: torch.Tensor, n_head: int) -> torch.Tensor:
     """
     Apply polynomial selection with sigmoid gating.
     
@@ -150,13 +151,13 @@ def polynomial_selection_(x: torch.Tensor, h: torch.Tensor) -> torch.Tensor:
     Returns:
         Gated output tensor
     """
-    return F.sigmoid(x) * h
+    return F.sigmoid(x).repeat_interleave(n_head, dim=-1) * h
 
 # =============================================================================
 # Main PoM Function
 # =============================================================================
 
-def pom(xq: torch.Tensor, xc: torch.Tensor, k: int, mask: Optional[torch.Tensor] = None) -> torch.Tensor:
+def pom(xq: torch.Tensor, xc: torch.Tensor, k: int, n_head: int, mask: Optional[torch.Tensor] = None) -> torch.Tensor:
     """
     Polynomial Mixer (PoM) operation.
     
@@ -173,7 +174,7 @@ def pom(xq: torch.Tensor, xc: torch.Tensor, k: int, mask: Optional[torch.Tensor]
         Output tensor after polynomial mixing
     """
     h = polynomial_aggregation_(xc, k, mask)
-    o = polynomial_selection_(xq, h)
+    o = polynomial_selection_(xq, h, n_head)
     return o
 
 # =============================================================================
@@ -198,7 +199,7 @@ class PoM(nn.Module):
         pom (callable): The polynomial mixer operation function
     """
     
-    def __init__(self, dim: int, degree: int, expand: int, bias: bool = True):
+    def __init__(self, dim: int, degree: int, expand: int, n_head: int, bias: bool = True):
         """
         Initialize the PoM module.
         
@@ -212,10 +213,13 @@ class PoM(nn.Module):
         self.dim = dim
         self.order = degree
         self.order_expand = expand
-
+        self.n_head = n_head
+        assert dim % n_head == 0, "dim must be divisible by n_head for group conv"
+        self.head_dim = dim * degree * expand // n_head
+        
         # Linear projections
-        self.po_proj = nn.Linear(dim, degree * expand * dim, bias=bias)
-        self.se_proj = nn.Linear(dim, degree * expand * dim, bias=bias)
+        self.po_proj = nn.Conv1d(dim, degree * expand * dim, kernel_size=1, bias=bias, groups=self.n_head)
+        self.se_proj = nn.Linear(dim, self.head_dim, bias=bias)
         self.ag_proj = nn.Linear(degree * expand * dim, dim, bias=bias)
         self.pom = pom
 
@@ -236,8 +240,8 @@ class PoM(nn.Module):
             xc = xq  # self-attention
 
         s = self.se_proj(xq)
-        h = self.po_proj(xc)
-        sh = self.pom(s, h, self.order, mask)
+        h = self.po_proj(xc.transpose(1, 2)).transpose(1, 2)
+        sh = self.pom(s, h, self.order, self.n_head, mask)
 
         return self.ag_proj(sh)
 
