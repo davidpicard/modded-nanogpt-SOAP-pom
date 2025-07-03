@@ -1,0 +1,6 @@
+# @package _global_
+
+defaults:
+  - override /model: effipomgptv2
+
+experiment_name: baseline_effipomv2
