@@ -46,6 +46,6 @@ logging:
 hardware:
   device: cuda
   dtype: bfloat16
-  compile: true 
+  compile: false
 
 experiment_name: baseline
