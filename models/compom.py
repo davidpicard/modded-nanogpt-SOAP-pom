@@ -4,20 +4,15 @@ import torch.nn.functional as F
 import torch._dynamo
 from typing import Optional, Tuple, Dict, Any
 
-torch._dynamo.config.suppress_errors = True
-
-
 # =============================================================================
 # Core Polynomial Functions
 # =============================================================================
 
-@torch.compile
 def gelu(x: torch.Tensor) -> torch.Tensor:
     """Apply GELU activation function with torch.compile optimization."""
     return F.gelu(x)
 
 
-@torch.compile
 def po2(x: torch.Tensor, coeff: torch.Tensor) -> torch.Tensor:
     """
     Second-order polynomial expansion.
@@ -34,7 +29,6 @@ def po2(x: torch.Tensor, coeff: torch.Tensor) -> torch.Tensor:
     return (h * coeff).sum(-1)
 
 
-@torch.compile
 def po3(x: torch.Tensor, coeff: torch.Tensor) -> torch.Tensor:
     """
     Third-order polynomial expansion.
@@ -52,7 +46,6 @@ def po3(x: torch.Tensor, coeff: torch.Tensor) -> torch.Tensor:
     return (h * coeff).sum(-1)
 
 
-@torch.compile
 def po4(x: torch.Tensor, coeff: torch.Tensor) -> torch.Tensor:
     """
     Fourth-order polynomial expansion.
@@ -150,7 +143,6 @@ def polynomial_aggregation_(x: torch.Tensor, coeff: torch.Tensor, k: int,
     return h
 
 
-@torch.compile
 def polynomial_selection_(x: torch.Tensor, h: torch.Tensor, n_sel_heads: int) -> torch.Tensor:
     """
     Apply polynomial selection with sigmoid gating.
