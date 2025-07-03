@@ -10,11 +10,11 @@ training:
   batch_size: 48
   accumulation: 2
   sequence_length: 1024
-  num_iterations: 1500
-  learning_rate: 0.0018
-  warmup_iters: 250
+  num_iterations: 750
+  learning_rate: 0.002
+  warmup_iters: 10
   warmdown_iters: 0
-  weight_decay: 0.5
+  weight_decay: 0.00001
 
 # Evaluation configuration
 evaluation:
@@ -29,7 +29,7 @@ evaluation:
   temperature: 1.0  # Sampling temperature
   top_k: 50  # Top-k sampling parameter
   prompt_length: 32  # Length of prompt for completion samples
-  sample_seed: 42  # Seed for reproducible text sampling
+  sample_seed: 3407  # Seed for reproducible text sampling
   debug_sampling: false  # Print debug info for sampling consistency
 
 # Distributed training
