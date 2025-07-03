@@ -310,9 +310,9 @@ def main(cfg: DictConfig):
     
     if hasattr(config, "coordinate_descent_tuning"):
         config.coordinate_descent_tuning = True  # suggested by @Chillee
-    
-    print0("compiling the model...")
+
     if cfg.hardware.compile:
+        print0("compiling the model...")
         model = torch.compile(model)
     
     # Wrap model in DDP
@@ -504,7 +504,7 @@ def main(cfg: DictConfig):
         
         # Logging
         dist.all_reduce(train_loss, op=dist.ReduceOp.AVG)
-        tokens_per_second = ddp_world_size * cfg.training.batch_size * cfg.training.sequence_length / (t1 - t0)
+        tokens_per_second = ddp_world_size * cfg.training.batch_size * cfg.training.sequence_length * cfg.training.accumulation / (t1 - t0)
         
         # Log training loss to wandb
         if master_process:
