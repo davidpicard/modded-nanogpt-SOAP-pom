@@ -1,11 +1,12 @@
 defaults:
- - mixing_layer: pom
+ - mixing_layer: compom
  - _self_
  - gpt: d12
 
 vocab_size: 50257
 n_layer: 12
-n_head: 1
+n_head: 32
+n_groups: 1
 degree: 2
 expand: 2
 n_embd: 768 
