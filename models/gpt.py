@@ -240,7 +240,7 @@ class GPT(nn.Module):
 
         return logits, loss
 
-    def configure_optimizers(self, weight_decay: float, learning_rate: float, betas: tuple):
+    def configure_optimizers(self, weight_decay: float, learning_rate: float, betas: tuple, precondition_frequency: int =1):
         """
         Configure optimizers for the model.
         
@@ -274,7 +274,7 @@ class GPT(nn.Module):
             lr=learning_rate,
             betas=(0.95, 0.95),  # Fixed betas for SOAP
             weight_decay=weight_decay,  # No weight decay for transformer layers
-            precondition_frequency=5  # Fixed precondition frequency
+            precondition_frequency=precondition_frequency  # Fixed precondition frequency
         )
         optimizers.append(transformer_optimizer)
         
