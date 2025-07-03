@@ -2,4 +2,4 @@ _target_: models.gpt.CausalSelfPoM
 n_embd: ${model.n_embd}
 degree: ${model.degree}
 expand: ${model.expand}
-n_head: ${model.n_head}
+n_groups: ${model.n_groups}
