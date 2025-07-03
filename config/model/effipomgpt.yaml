@@ -9,3 +9,4 @@ n_head: 12
 degree: 2
 expand: 2
 n_embd: 768 
+n_groups: 768

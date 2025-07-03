@@ -153,8 +153,11 @@ def polynomial_selection_(x: torch.Tensor, h: torch.Tensor, n_groups: int) -> to
     Returns:
         Gated output tensor
     """
-    group_dim = h.shape[-1] // n_groups
-    return F.sigmoid(x).repeat_interleave(group_dim, dim=-1, output_size=h.shape[-1]) * h
+    s = F.sigmoid(x).unsqueeze(-1)
+    orig_shape = h.shape
+    new_shape = (*h.shape[:-1], n_groups, h.shape[-1] // n_groups)
+    h = h.view(new_shape)
+    return (s * h).view(orig_shape)
 
 # =============================================================================
 # Main PoM Function
