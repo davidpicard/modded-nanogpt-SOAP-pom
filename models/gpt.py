@@ -274,7 +274,7 @@ class GPT(nn.Module):
             lr=learning_rate,
             betas=(0.95, 0.95),  # Fixed betas for SOAP
             weight_decay=weight_decay,  # No weight decay for transformer layers
-            precondition_frequency=25  # Fixed precondition frequency
+            precondition_frequency=5  # Fixed precondition frequency
         )
         optimizers.append(transformer_optimizer)
         
