@@ -4,6 +4,7 @@ import torch.nn.functional as F
 import models.pom as pom
 import models.effipom as effipom
 import models.effipomv2 as effipomv2
+import models.effipom_no_selection as effipom_no_selection
 import math
 from copy import deepcopy
 
@@ -103,6 +104,22 @@ class CausalSelfEffiPoMv2(nn.Module):
         self.n_groups = n_groups
         self.n_embd = n_embd
         self.pom = effipomv2.EffiPoM(self.n_embd, self.degree, self.expand, self.n_groups, False)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        B, T, C = x.size()
+        mask = torch.tril(torch.ones((T, T))).unsqueeze(0)
+        return self.pom(x, x, mask)
+    
+class CausalSelfEffiPoMNoSelection(nn.Module):
+    """Causal self-attention using efficient Polynomial Mixer."""
+    
+    def __init__(self, n_embd, degree, expand, n_groups):
+        super().__init__()
+        self.degree = degree
+        self.expand = expand
+        self.n_groups = n_groups
+        self.n_embd = n_embd
+        self.pom = effipom_no_selection.EffiPoM(self.n_embd, self.degree, self.expand, self.n_groups, False)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         B, T, C = x.size()
