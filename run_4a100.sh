@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Run training with Hydra configuration
-torchrun --standalone --nproc_per_node=1 train.py \
+torchrun --standalone --nproc_per_node=4 train.py \
     experiment=pomgpt_baseline \
     training.batch_size=32 \
     training.accumulation=8 \
@@ -9,4 +9,4 @@ torchrun --standalone --nproc_per_node=1 train.py \
     training.weight_decay=0.00001 \
     model.n_head=96 \
     model.n_groups=4 \
-    model.expand=3
+    model.expand=4
