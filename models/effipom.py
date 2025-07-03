@@ -153,7 +153,8 @@ def polynomial_selection_(x: torch.Tensor, h: torch.Tensor, n_head: int) -> torc
     Returns:
         Gated output tensor
     """
-    return F.sigmoid(x).repeat_interleave(n_head, dim=-1, output_size=h.shape[-1]) * h
+    head_dim = h.shape[-1] // n_head
+    return F.sigmoid(x).repeat_interleave(head_dim, dim=-1, output_size=h.shape[-1]) * h
 
 # =============================================================================
 # Main PoM Function
@@ -218,12 +219,11 @@ class EffiPoM(nn.Module):
         self.order_expand = expand
         self.n_head = n_head
         assert dim % n_head == 0, "dim must be divisible by n_head for group conv"
-        self.head_dim = dim * expand // n_head
 
         # Linear projections
-        self.po_proj = nn.Conv1d(dim, expand * dim, kernel_size=1, bias=bias, groups=self.n_head)
+        self.po_proj = nn.Conv1d(dim, expand * dim, kernel_size=1, bias=bias, groups=n_head)
         self.po_coeff = nn.Parameter(torch.randn(dim * expand, degree))
-        self.se_proj = nn.Linear(dim, self.head_dim, bias=bias)
+        self.se_proj = nn.Linear(dim, n_head, bias=bias)
         self.ag_proj = nn.Linear(expand * dim, dim, bias=bias)
         self.pom = pom
 
