@@ -238,7 +238,10 @@ class ComPoM(nn.Module):
         assert dim * expand % n_sel_heads == 0, "dim * expand must be divisible by n_sel_heads"
 
         # Linear projections
-        self.po_proj = nn.Conv1d(dim, expand * dim, kernel_size=1, bias=bias, groups=n_groups)
+        if self.n_groups > 1:
+            self.po_proj = nn.Conv1d(dim, expand * dim, kernel_size=1, bias=bias, groups=n_groups)
+        else:
+            self.po_proj = nn.Linear(dim, expand * dim, bias=bias)
         self.po_coeff = nn.Parameter(0.02*torch.randn(dim * expand, degree))
         self.se_proj = nn.Linear(dim, n_sel_heads, bias=bias)
         self.ag_proj = nn.Linear(expand * dim, dim, bias=bias)
@@ -261,7 +264,10 @@ class ComPoM(nn.Module):
             xc = xq  # self-attention
 
         s = self.se_proj(xq)
-        h = self.po_proj(xc.transpose(1, 2)).transpose(1, 2)
+        if self.n_groups > 1:
+            h = self.po_proj(xc.transpose(1, 2)).transpose(1, 2)
+        else:
+            h = self.po_proj(xc)
         sh = self.pom(s, h, self.po_coeff, self.order, self.n_sel_heads, mask)
 
         return self.ag_proj(sh)
