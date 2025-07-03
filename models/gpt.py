@@ -5,6 +5,9 @@ import models.pom as pom
 import math
 from copy import deepcopy
 
+from models import compom
+
+
 def rmsnorm(x0, eps=1e-6):
     """RMS normalization function (matching reference implementation)."""
     x = x0.float()
@@ -69,6 +72,25 @@ class CausalSelfPoM(nn.Module):
         self.n_embd = n_embd
         self.head_dim = self.n_embd // self.n_head
         self.pom = pom.PoM(self.n_embd, self.degree, self.expand, self.n_head, False)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        B, T, C = x.size()
+        mask = torch.tril(torch.ones((T, T))).unsqueeze(0)
+        return self.pom(x, x, mask)
+
+
+class CausalSelfComPoM(nn.Module):
+    """Causal self-attention using Polynomial Mixer."""
+
+    def __init__(self, n_embd, degree, expand, n_head, n_groups):
+        super().__init__()
+        self.degree = degree
+        self.expand = expand
+        self.n_head = n_head
+        self.n_embd = n_embd
+        self.n_groups = n_groups
+        self.head_dim = self.n_embd // self.n_head
+        self.pom = compom.ComPoM(self.n_embd, self.degree, self.expand, self.n_groups, self.n_head, False)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         B, T, C = x.size()
@@ -251,7 +273,7 @@ class GPT(nn.Module):
             self.transformer.h.parameters(),
             lr=learning_rate,
             betas=(0.95, 0.95),  # Fixed betas for SOAP
-            weight_decay=0,  # No weight decay for transformer layers
+            weight_decay=weight_decay,  # No weight decay for transformer layers
             precondition_frequency=10  # Fixed precondition frequency
         )
         optimizers.append(transformer_optimizer)
