@@ -289,12 +289,12 @@ def main(cfg: DictConfig):
     # Initialize model using Hydra instantiate
     model = instantiate(cfg.model.gpt)
     model = model.cuda()
-    
-    # Count and display model parameters
-    total_params, trainable_params = count_parameters(model, print_breakdown=True)
+
     
     # Log parameter counts to wandb
     if master_process:
+        # Count and display model parameters
+        total_params, trainable_params = count_parameters(model, print_breakdown=True)
         wandb.log({
             "model/total_parameters": total_params,
             "model/trainable_parameters": trainable_params,
