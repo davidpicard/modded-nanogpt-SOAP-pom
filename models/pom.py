@@ -212,7 +212,7 @@ class PoM(nn.Module):
         self.dim = dim
         self.order = degree
         self.order_expand = expand
-        
+
         # Linear projections
         self.po_proj = nn.Linear(dim, degree * expand * dim, bias=bias)
         self.se_proj = nn.Linear(dim, degree * expand * dim, bias=bias)
