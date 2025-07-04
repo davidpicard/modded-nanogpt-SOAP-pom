@@ -267,6 +267,15 @@ class GPT(nn.Module):
             weight_decay=0  # No weight decay for lm_head
         )
         optimizers.append(lm_head_optimizer)
+
+        # train word embedding
+        lm_head_optimizer = AdamWOptimizer(
+            self.transformer.wte.parameters(),
+            lr=learning_rate,
+            betas=betas,
+            weight_decay=0  # No weight decay for lm_head
+        )
+        optimizers.append(lm_head_optimizer)
         
         # SOAP for transformer layers - use raw SOAP class like reference
         # transformer_optimizer = SOAP(
@@ -279,6 +288,7 @@ class GPT(nn.Module):
         transformer_optimizer = AdamWOptimizer(
             self.transformer.h.parameters(),
             lr=learning_rate,
+            betas=(0.9, 0.95),
             weight_decay=weight_decay
         )
         optimizers.append(transformer_optimizer)
