@@ -220,7 +220,7 @@ class ComPoM(nn.Module):
 
         # Linear projections
         self.po_proj = nn.Linear(dim, expand * dim, bias=bias)
-        self.po_coeff = nn.Parameter(torch.randn(dim * expand, degree))
+        self.po_coeff = nn.Parameter(0.02 * torch.randn(dim * expand, degree))
         self.se_proj = nn.Linear(dim, expand * dim, bias=bias)
         self.ag_proj = nn.Linear(expand * dim, dim, bias=bias)
         self.pom = pom
