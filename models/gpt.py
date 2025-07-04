@@ -2,9 +2,11 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import models.pom as pom
-import models.effipom as effipom
-import models.effipomv2 as effipomv2
-import models.effipom_no_selection as effipom_no_selection
+import models.headed_pom as headed_pom
+import models.compom as compom
+import models.headed_compom as headed_compom
+import models.headed_compom_no_selection as headed_compom_no_selection
+import models.compom_no_selection as compom_no_selection
 import math
 from copy import deepcopy
 
@@ -65,37 +67,67 @@ def apply_rotary_emb(x, cos, sin):
 class CausalSelfPoM(nn.Module):
     """Causal self-attention using Polynomial Mixer."""
     
-    def __init__(self, n_embd, degree, expand, n_groups):
+    def __init__(self, n_embd, degree, expand):
         super().__init__()
         self.degree = degree
         self.expand = expand
-        self.n_groups = n_groups
         self.n_embd = n_embd
-        self.pom = pom.PoM(self.n_embd, self.degree, self.expand, self.n_groups, False)
+        self.pom = pom.PoM(self.n_embd, self.degree, self.expand, False)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         B, T, C = x.size()
         mask = torch.tril(torch.ones((T, T))).unsqueeze(0)
         return self.pom(x, x, mask)
 
-class CausalSelfEffiPoM(nn.Module):
-    """Causal self-attention using efficient Polynomial Mixer."""
+class CausalSelfHeadedPoM(nn.Module):
+    """Causal self-attention using Polynomial Mixer."""
     
-    def __init__(self, n_embd, degree, expand, n_groups):
+    def __init__(self, n_embd, degree, expand, n_groups, n_sel_heads):
         super().__init__()
         self.degree = degree
         self.expand = expand
         self.n_groups = n_groups
+        self.n_sel_heads = n_sel_heads
         self.n_embd = n_embd
-        self.pom = effipom.EffiPoM(self.n_embd, self.degree, self.expand, self.n_groups, False)
+        self.pom = headed_pom.PoM(self.n_embd, self.degree, self.expand, self.n_groups, self.n_sel_heads, False)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        B, T, C = x.size()
+        mask = torch.tril(torch.ones((T, T))).unsqueeze(0)
+        return self.pom(x, x, mask)
+
+class CausalSelfComPoM(nn.Module):
+    """Causal self-attention using compact Polynomial Mixer."""
+    
+    def __init__(self, n_embd, degree, expand):
+        super().__init__()
+        self.degree = degree
+        self.expand = expand
+        self.n_embd = n_embd
+        self.pom = compom.ComPoM(self.n_embd, self.degree, self.expand, False)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         B, T, C = x.size()
         mask = torch.tril(torch.ones((T, T))).unsqueeze(0)
         return self.pom(x, x, mask)
     
-class CausalSelfEffiPoMv2(nn.Module):
-    """Causal self-attention using efficient Polynomial Mixer."""
+class CausalSelfComPoMNoSelection(nn.Module):
+    """Causal self-attention using compact Polynomial Mixer."""
+    
+    def __init__(self, n_embd, degree, expand):
+        super().__init__()
+        self.degree = degree
+        self.expand = expand
+        self.n_embd = n_embd
+        self.pom = compom_no_selection.ComPoM(self.n_embd, self.degree, self.expand, False)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        B, T, C = x.size()
+        mask = torch.tril(torch.ones((T, T))).unsqueeze(0)
+        return self.pom(x, x, mask)
+    
+class CausalSelfHeadedComPoM(nn.Module):
+    """Causal self-attention using compact Polynomial Mixer."""
     
     def __init__(self, n_embd, degree, expand, n_groups, n_sel_heads):
         super().__init__()
@@ -104,15 +136,15 @@ class CausalSelfEffiPoMv2(nn.Module):
         self.n_groups = n_groups
         self.n_embd = n_embd
         self.n_sel_heads = n_sel_heads
-        self.pom = effipomv2.EffiPoM(self.n_embd, self.degree, self.expand, self.n_groups, self.n_sel_heads, False)
+        self.pom = headed_compom.ComPoM(self.n_embd, self.degree, self.expand, self.n_groups, self.n_sel_heads, False)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         B, T, C = x.size()
         mask = torch.tril(torch.ones((T, T))).unsqueeze(0)
         return self.pom(x, x, mask)
     
-class CausalSelfEffiPoMNoSelection(nn.Module):
-    """Causal self-attention using efficient Polynomial Mixer."""
+class CausalSelfHeadedComPoMNoSelection(nn.Module):
+    """Causal self-attention using compact Polynomial Mixer."""
     
     def __init__(self, n_embd, degree, expand, n_groups):
         super().__init__()
@@ -120,7 +152,7 @@ class CausalSelfEffiPoMNoSelection(nn.Module):
         self.expand = expand
         self.n_groups = n_groups
         self.n_embd = n_embd
-        self.pom = effipom_no_selection.EffiPoM(self.n_embd, self.degree, self.expand, self.n_groups, False)
+        self.pom = headed_compom_no_selection.ComPoM(self.n_embd, self.degree, self.expand, self.n_groups, False)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         B, T, C = x.size()

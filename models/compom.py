@@ -62,7 +62,7 @@ def po4(x: torch.Tensor, coeff: torch.Tensor) -> torch.Tensor:
     h = gelu(x).unsqueeze(-1)
     h2 = h * h
     h3 = h2 * h
-    h4 = h2 * h2
+    h4 = h3 * h
     h = torch.cat([h, h2, h3, h4], dim=-1)
     return (h * coeff).sum(-1)
 
@@ -109,7 +109,7 @@ def polynomial_aggregation_(x: torch.Tensor, coeff: torch.Tensor, k: int, mask: 
     
     Args:
         x: Input tensor of shape (batch, seq_len, dim)
-        coeff: Polynomial coefficients of shape TODO
+        coeff: Polynomial coefficients of shape (batch, seq_len, dim)
         k: Polynomial order (2, 3, 4, or higher)
         mask: Optional attention mask
         
@@ -126,7 +126,7 @@ def polynomial_aggregation_(x: torch.Tensor, coeff: torch.Tensor, k: int, mask: 
     else:
         # Generic case for k > 4
         h = gelu(x).unsqueeze(-1)
-        h = torch.cat([h ** i for i in range(k)], dim=-1)  # TODO vectorize
+        h = torch.cat([h ** i for i in range(k)], dim=-1)
         h = (h * coeff).sum(-1)
     
     # Apply masking if provided
@@ -141,11 +141,25 @@ def polynomial_aggregation_(x: torch.Tensor, coeff: torch.Tensor, k: int, mask: 
             raise ValueError(f'Unsupported mask dimension: {mask.dim()}. Expected 2, 3, or None.')
     return h
 
+@torch.compile
+def polynomial_selection_(x: torch.Tensor, h: torch.Tensor) -> torch.Tensor:
+    """
+    Apply polynomial selection with sigmoid gating.
+    
+    Args:
+        x: Query tensor
+        h: Context tensor from polynomial aggregation
+        
+    Returns:
+        Gated output tensor
+    """
+    return F.sigmoid(x) * h
+
 # =============================================================================
 # Main PoM Function
 # =============================================================================
 
-def pom(xc: torch.Tensor, coeff: torch.Tensor, k: int, mask: Optional[torch.Tensor] = None) -> torch.Tensor:
+def pom(xq: torch.Tensor, xc: torch.Tensor, coeff: torch.Tensor, k: int, mask: Optional[torch.Tensor] = None) -> torch.Tensor:
     """
     Polynomial Mixer (PoM) operation.
     
@@ -155,22 +169,24 @@ def pom(xc: torch.Tensor, coeff: torch.Tensor, k: int, mask: Optional[torch.Tens
     Args:
         xq: Query input tensor of shape (batch, query_len, dim)
         xc: Context input tensor of shape (batch, context_len, dim)
-        coeff: Polynomial coefficients of shape TODO
+        coeff: Polynomial coefficients of shape (batch, context_len, dim)
         k: Polynomial order (degree of interactions to capture)
         mask: Optional attention mask for masking specific positions
         
     Returns:
         Output tensor after polynomial mixing
     """
-    return polynomial_aggregation_(xc, coeff, k, mask)
+    h = polynomial_aggregation_(xc, coeff, k, mask)
+    o = polynomial_selection_(xq, h)
+    return o
 
 # =============================================================================
-# EffiPoM Module Class
+# ComPoM Module Class
 # =============================================================================
 
-class EffiPoM(nn.Module):
+class ComPoM(nn.Module):
     """
-    More efficient Polynomial Mixer (PoM) Module.
+    More compact Polynomial Mixer (PoM) Module.
     
     A custom neural network layer designed for capturing higher-order interactions 
     between input features through polynomial expansions. This module consists of
@@ -181,12 +197,13 @@ class EffiPoM(nn.Module):
         order (int): The order of the polynomial interactions to capture
         order_expand (int): The expansion factor for the polynomial order
         po_proj (nn.Linear): Linear projection for polynomial computation
+        po_coeff (nn.Parameter): Coefficients for polynomial computation
         se_proj (nn.Linear): Linear projection for selection mechanism
         ag_proj (nn.Linear): Linear projection for output aggregation
         pom (callable): The polynomial mixer operation function
     """
     
-    def __init__(self, dim: int, degree: int, expand: int, n_groups: int, bias: bool = True):
+    def __init__(self, dim: int, degree: int, expand: int, bias: bool = True):
         """
         Initialize the PoM module.
         
@@ -200,12 +217,11 @@ class EffiPoM(nn.Module):
         self.dim = dim
         self.order = degree
         self.order_expand = expand
-        self.n_groups = n_groups
-        assert dim % n_groups == 0, "dim must be divisible by n_groups for group conv"
 
         # Linear projections
-        self.po_proj = nn.Conv1d(dim, expand * dim, kernel_size=1, bias=bias, groups=n_groups)
+        self.po_proj = nn.Linear(dim, expand * dim, bias=bias)
         self.po_coeff = nn.Parameter(torch.randn(dim * expand, degree))
+        self.se_proj = nn.Linear(dim, expand * dim, bias=bias)
         self.ag_proj = nn.Linear(expand * dim, dim, bias=bias)
         self.pom = pom
 
@@ -225,8 +241,10 @@ class EffiPoM(nn.Module):
         if xc is None:
             xc = xq  # self-attention
 
-        h = self.po_proj(xc.transpose(1, 2)).transpose(1, 2)
-        sh = self.pom(h, self.po_coeff, self.order, mask)
+        s = self.se_proj(xq)
+        h = self.po_proj(xc)
+        sh = self.pom(s, h, self.po_coeff, self.order, mask)
+
         return self.ag_proj(sh)
 
     def state_forward(self, xq: torch.Tensor, xc: Optional[torch.Tensor] = None, 
@@ -245,6 +263,7 @@ class EffiPoM(nn.Module):
         if xc is None:
             xc = xq  # self-attention
 
+        s = self.se_proj(xq)
         xc = self.po_proj(xc)
         h_current = polynomial_aggregation_(xc, self.po_coeff, self.order)
         n_current = h_current.shape[1]
@@ -259,4 +278,5 @@ class EffiPoM(nn.Module):
 
         new_state = {'h': h, 'n': n_past + n_current}
 
-        return self.ag_proj(h), new_state
+        sh = polynomial_selection_(s, h)
+        return self.ag_proj(sh), new_state

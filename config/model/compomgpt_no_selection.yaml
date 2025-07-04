@@ -1,5 +1,5 @@
 defaults:
- - mixing_layer: effipom
+ - mixing_layer: compom_no_selection
  - _self_
  - gpt: d12
 
@@ -8,5 +8,4 @@ n_layer: 12
 n_head: 12
 degree: 2
 expand: 2
-n_embd: 768 
-n_groups: 768
+n_embd: 768

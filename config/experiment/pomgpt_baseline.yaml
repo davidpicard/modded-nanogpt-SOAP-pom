@@ -3,4 +3,4 @@
 defaults:
   - override /model: pomgpt
 
-experiment_name: baseline_pom_marta
+experiment_name: baseline_pom

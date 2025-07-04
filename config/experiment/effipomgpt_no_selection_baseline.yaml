@@ -1,6 +1,0 @@
-# @package _global_
-
-defaults:
-  - override /model: effipomgpt_no_selection
-
-experiment_name: baseline_effipom

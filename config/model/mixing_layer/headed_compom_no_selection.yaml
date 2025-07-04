@@ -1,4 +1,4 @@
-_target_: models.gpt.CausalSelfEffiPoMNoSelection
+_target_: models.gpt.CausalSelfHeadedComPoMNoSelection
 n_embd: ${model.n_embd}
 degree: ${model.degree}
 expand: ${model.expand}

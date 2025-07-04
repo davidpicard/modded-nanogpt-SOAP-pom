@@ -1,5 +1,0 @@
-_target_: models.gpt.CausalSelfEffiPoM
-n_embd: ${model.n_embd}
-degree: ${model.degree}
-expand: ${model.expand}
-n_groups: ${model.n_groups}

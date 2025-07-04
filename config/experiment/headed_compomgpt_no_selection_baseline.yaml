@@ -1,0 +1,6 @@
+# @package _global_
+
+defaults:
+  - override /model: headed_compomgpt_no_selection
+
+experiment_name: baseline_headed_compom_no_selection

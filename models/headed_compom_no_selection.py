@@ -62,7 +62,7 @@ def po4(x: torch.Tensor, coeff: torch.Tensor) -> torch.Tensor:
     h = gelu(x).unsqueeze(-1)
     h2 = h * h
     h3 = h2 * h
-    h4 = h2 * h2
+    h4 = h3 * h2
     h = torch.cat([h, h2, h3, h4], dim=-1)
     return (h * coeff).sum(-1)
 
@@ -141,26 +141,11 @@ def polynomial_aggregation_(x: torch.Tensor, coeff: torch.Tensor, k: int, mask: 
             raise ValueError(f'Unsupported mask dimension: {mask.dim()}. Expected 2, 3, or None.')
     return h
 
-@torch.compile
-def polynomial_selection_(x: torch.Tensor, h: torch.Tensor, n_groups: int) -> torch.Tensor:
-    """
-    Apply polynomial selection with sigmoid gating.
-    
-    Args:
-        x: Query tensor
-        h: Context tensor from polynomial aggregation
-        
-    Returns:
-        Gated output tensor
-    """
-    group_dim = h.shape[-1] // n_groups
-    return F.sigmoid(x).repeat_interleave(group_dim, dim=-1, output_size=h.shape[-1]) * h
-
 # =============================================================================
 # Main PoM Function
 # =============================================================================
 
-def pom(xq: torch.Tensor, xc: torch.Tensor, coeff: torch.Tensor, k: int, n_groups:int, mask: Optional[torch.Tensor] = None) -> torch.Tensor:
+def pom(xc: torch.Tensor, coeff: torch.Tensor, k: int, mask: Optional[torch.Tensor] = None) -> torch.Tensor:
     """
     Polynomial Mixer (PoM) operation.
     
@@ -177,9 +162,7 @@ def pom(xq: torch.Tensor, xc: torch.Tensor, coeff: torch.Tensor, k: int, n_group
     Returns:
         Output tensor after polynomial mixing
     """
-    h = polynomial_aggregation_(xc, coeff, k, mask)
-    o = polynomial_selection_(xq, h, n_groups)
-    return o
+    return polynomial_aggregation_(xc, coeff, k, mask)
 
 # =============================================================================
 # EffiPoM Module Class
@@ -222,8 +205,7 @@ class EffiPoM(nn.Module):
 
         # Linear projections
         self.po_proj = nn.Conv1d(dim, expand * dim, kernel_size=1, bias=bias, groups=n_groups)
-        self.po_coeff = nn.Parameter(torch.randn(dim * expand, degree))
-        self.se_proj = nn.Linear(dim, n_groups, bias=bias)
+        self.po_coeff = nn.Parameter(0.02 * torch.randn(dim * expand, degree))
         self.ag_proj = nn.Linear(expand * dim, dim, bias=bias)
         self.pom = pom
 
@@ -243,10 +225,8 @@ class EffiPoM(nn.Module):
         if xc is None:
             xc = xq  # self-attention
 
-        s = self.se_proj(xq)
         h = self.po_proj(xc.transpose(1, 2)).transpose(1, 2)
-        sh = self.pom(s, h, self.po_coeff, self.order, self.n_groups, mask)
-
+        sh = self.pom(h, self.po_coeff, self.order, mask)
         return self.ag_proj(sh)
 
     def state_forward(self, xq: torch.Tensor, xc: Optional[torch.Tensor] = None, 
@@ -265,7 +245,6 @@ class EffiPoM(nn.Module):
         if xc is None:
             xc = xq  # self-attention
 
-        s = self.se_proj(xq)
         xc = self.po_proj(xc)
         h_current = polynomial_aggregation_(xc, self.po_coeff, self.order)
         n_current = h_current.shape[1]
@@ -280,5 +259,4 @@ class EffiPoM(nn.Module):
 
         new_state = {'h': h, 'n': n_past + n_current}
 
-        sh = polynomial_selection_(s, h, self.n_groups)
-        return self.ag_proj(sh), new_state
+        return self.ag_proj(h), new_state

@@ -227,7 +227,7 @@ class EffiPoM(nn.Module):
 
         # Linear projections
         self.po_proj = nn.Conv1d(dim, expand * dim, kernel_size=1, bias=bias, groups=n_groups)
-        self.po_coeff = nn.Parameter(torch.randn(dim * expand, degree))
+        self.po_coeff = nn.Parameter(torch.randn(0.02 * dim * expand, degree))
         self.se_proj = nn.Linear(dim, n_sel_heads, bias=bias)
         self.ag_proj = nn.Linear(expand * dim, dim, bias=bias)
         self.pom = pom
