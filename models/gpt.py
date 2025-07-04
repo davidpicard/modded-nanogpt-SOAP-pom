@@ -97,13 +97,14 @@ class CausalSelfEffiPoM(nn.Module):
 class CausalSelfEffiPoMv2(nn.Module):
     """Causal self-attention using efficient Polynomial Mixer."""
     
-    def __init__(self, n_embd, degree, expand, n_groups):
+    def __init__(self, n_embd, degree, expand, n_groups, n_sel_heads):
         super().__init__()
         self.degree = degree
         self.expand = expand
         self.n_groups = n_groups
         self.n_embd = n_embd
-        self.pom = effipomv2.EffiPoM(self.n_embd, self.degree, self.expand, self.n_groups, False)
+        self.n_sel_heads = n_sel_heads
+        self.pom = effipomv2.EffiPoM(self.n_embd, self.degree, self.expand, self.n_groups, self.n_sel_heads, False)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         B, T, C = x.size()
