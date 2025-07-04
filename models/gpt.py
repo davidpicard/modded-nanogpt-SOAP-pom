@@ -2,8 +2,13 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import models.pom as pom
+import models.headed_pom as headed_pom
+import models.compom as compom
+import models.headed_compom as headed_compom
+import models.compom_no_selection as compom_no_selection
 import math
 from copy import deepcopy
+
 
 def rmsnorm(x0, eps=1e-6):
     """RMS normalization function (matching reference implementation)."""
@@ -61,14 +66,76 @@ def apply_rotary_emb(x, cos, sin):
 class CausalSelfPoM(nn.Module):
     """Causal self-attention using Polynomial Mixer."""
     
-    def __init__(self, n_embd, degree, expand, n_head):
+    def __init__(self, n_embd, degree, expand):
         super().__init__()
         self.degree = degree
         self.expand = expand
-        self.n_head = n_head
         self.n_embd = n_embd
-        self.head_dim = self.n_embd // self.n_head
-        self.pom = pom.PoM(self.n_embd, self.degree, self.expand, self.n_head, False)
+        self.pom = pom.PoM(self.n_embd, self.degree, self.expand, False)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        B, T, C = x.size()
+        mask = torch.tril(torch.ones((T, T))).unsqueeze(0)
+        return self.pom(x, x, mask)
+
+class CausalSelfHeadedPoM(nn.Module):
+    """Causal self-attention using Polynomial Mixer."""
+    
+    def __init__(self, n_embd, degree, expand, n_groups, n_sel_heads):
+        super().__init__()
+        self.degree = degree
+        self.expand = expand
+        self.n_groups = n_groups
+        self.n_sel_heads = n_sel_heads
+        self.n_embd = n_embd
+        self.pom = headed_pom.PoM(self.n_embd, self.degree, self.expand, self.n_groups, self.n_sel_heads, False)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        B, T, C = x.size()
+        mask = torch.tril(torch.ones((T, T))).unsqueeze(0)
+        return self.pom(x, x, mask)
+
+class CausalSelfComPoM(nn.Module):
+    """Causal self-attention using compact Polynomial Mixer."""
+    
+    def __init__(self, n_embd, degree, expand):
+        super().__init__()
+        self.degree = degree
+        self.expand = expand
+        self.n_embd = n_embd
+        self.pom = compom.ComPoM(self.n_embd, self.degree, self.expand, False)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        B, T, C = x.size()
+        mask = torch.tril(torch.ones((T, T))).unsqueeze(0)
+        return self.pom(x, x, mask)
+    
+class CausalSelfComPoMNoSelection(nn.Module):
+    """Causal self-attention using compact Polynomial Mixer."""
+    
+    def __init__(self, n_embd, degree, expand):
+        super().__init__()
+        self.degree = degree
+        self.expand = expand
+        self.n_embd = n_embd
+        self.pom = compom_no_selection.ComPoM(self.n_embd, self.degree, self.expand, False)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        B, T, C = x.size()
+        mask = torch.tril(torch.ones((T, T))).unsqueeze(0)
+        return self.pom(x, x, mask)
+    
+class CausalSelfHeadedComPoM(nn.Module):
+    """Causal self-attention using compact Polynomial Mixer."""
+    
+    def __init__(self, n_embd, degree, expand, n_groups, n_sel_heads):
+        super().__init__()
+        self.degree = degree
+        self.expand = expand
+        self.n_groups = n_groups
+        self.n_embd = n_embd
+        self.n_sel_heads = n_sel_heads
+        self.pom = headed_compom.ComPoM(self.n_embd, self.degree, self.expand, self.n_groups, self.n_sel_heads, False)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         B, T, C = x.size()

@@ -1,0 +1,6 @@
+# @package _global_
+
+defaults:
+  - override /model: headed_pomgpt
+
+experiment_name: baseline_headed_pom

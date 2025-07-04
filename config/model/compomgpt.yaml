@@ -1,5 +1,5 @@
 defaults:
- - mixing_layer: pom
+ - mixing_layer: compom
  - _self_
  - gpt: d12
 

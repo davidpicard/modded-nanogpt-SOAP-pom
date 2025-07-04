@@ -139,24 +139,26 @@ def polynomial_aggregation_(x: torch.Tensor, k: int, mask: Optional[torch.Tensor
     return h
 
 @torch.compile
-def polynomial_selection_(x: torch.Tensor, h: torch.Tensor) -> torch.Tensor:
+def polynomial_selection_(x: torch.Tensor, h: torch.Tensor, n_sel_heads: int) -> torch.Tensor:
     """
     Apply polynomial selection with sigmoid gating.
     
     Args:
         x: Query tensor
         h: Context tensor from polynomial aggregation
+        n_sel_heads: Number of selection heads
         
     Returns:
         Gated output tensor
     """
-    return F.sigmoid(x) * h
+    head_dim = h.shape[-1] // n_sel_heads
+    return F.sigmoid(x).repeat_interleave(head_dim, dim=-1, output_size=h.shape[-1]) * h
 
 # =============================================================================
 # Main PoM Function
 # =============================================================================
 
-def pom(xq: torch.Tensor, xc: torch.Tensor, k: int, mask: Optional[torch.Tensor] = None) -> torch.Tensor:
+def pom(xq: torch.Tensor, xc: torch.Tensor, k: int, n_sel_heads: int, mask: Optional[torch.Tensor] = None) -> torch.Tensor:
     """
     Polynomial Mixer (PoM) operation.
     
@@ -167,13 +169,14 @@ def pom(xq: torch.Tensor, xc: torch.Tensor, k: int, mask: Optional[torch.Tensor]
         xq: Query input tensor of shape (batch, query_len, dim)
         xc: Context input tensor of shape (batch, context_len, dim)
         k: Polynomial order (degree of interactions to capture)
+        n_sel_heads: Number of selection heads
         mask: Optional attention mask for masking specific positions
         
     Returns:
         Output tensor after polynomial mixing
     """
     h = polynomial_aggregation_(xc, k, mask)
-    o = polynomial_selection_(xq, h)
+    o = polynomial_selection_(xq, h, n_sel_heads)
     return o
 
 # =============================================================================
@@ -198,7 +201,7 @@ class PoM(nn.Module):
         pom (callable): The polynomial mixer operation function
     """
     
-    def __init__(self, dim: int, degree: int, expand: int, bias: bool = True):
+    def __init__(self, dim: int, degree: int, expand: int, n_groups: int, n_sel_heads: int, bias: bool = True):
         """
         Initialize the PoM module.
         
@@ -207,15 +210,21 @@ class PoM(nn.Module):
             degree: The degree of the polynomial to capture
             expand: The expansion factor for the polynomial order
             bias: Whether to include bias terms in linear projections
+            n_groups: Number of convolution groups for polynomial computation
+            n_sel_heads: Number of selection heads
         """
         super().__init__()
         self.dim = dim
         self.order = degree
         self.order_expand = expand
-
+        self.n_groups = n_groups
+        self.n_sel_heads = n_sel_heads
+        assert dim % n_groups == 0, "dim must be divisible by n_groups for group conv"
+        assert dim * expand % n_sel_heads == 0, "dim * expand must be divisible by n_sel_heads"
+        
         # Linear projections
-        self.po_proj = nn.Linear(dim, degree * expand * dim, bias=bias)
-        self.se_proj = nn.Linear(dim, degree * expand * dim, bias=bias)
+        self.po_proj = nn.Conv1d(dim, degree * expand * dim, kernel_size=1, bias=bias, groups=n_groups)
+        self.se_proj = nn.Linear(dim, n_sel_heads, bias=bias)
         self.ag_proj = nn.Linear(degree * expand * dim, dim, bias=bias)
         self.pom = pom
 
@@ -236,8 +245,8 @@ class PoM(nn.Module):
             xc = xq  # self-attention
 
         s = self.se_proj(xq)
-        h = self.po_proj(xc)
-        sh = self.pom(s, h, self.order, mask)
+        h = self.po_proj(xc.transpose(1, 2)).transpose(1, 2)
+        sh = self.pom(s, h, self.order, self.n_sel_heads, mask)
 
         return self.ag_proj(sh)
 
@@ -258,7 +267,7 @@ class PoM(nn.Module):
             xc = xq  # self-attention
 
         s = self.se_proj(xq)
-        xc = self.po_proj(xc.transpose(1, 2)).transpose(1, 2)
+        xc = self.po_proj(xc)
         h_current = polynomial_aggregation_(xc, self.order)
         n_current = h_current.shape[1]
 
@@ -272,5 +281,5 @@ class PoM(nn.Module):
 
         new_state = {'h': h, 'n': n_past + n_current}
 
-        sh = polynomial_selection_(s, h)
+        sh = polynomial_selection_(s, h, self.n_sel_heads)
         return self.ag_proj(sh), new_state

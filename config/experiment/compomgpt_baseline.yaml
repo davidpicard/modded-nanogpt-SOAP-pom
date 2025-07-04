@@ -1,0 +1,6 @@
+# @package _global_
+
+defaults:
+  - override /model: compomgpt
+
+experiment_name: baseline_compom

@@ -17,6 +17,7 @@ import tiktoken
 from rich.progress import Progress, TextColumn, BarColumn, TimeElapsedColumn, TimeRemainingColumn, MofNCompleteColumn, SpinnerColumn, ProgressColumn
 from rich.console import Console
 from rich.text import Text
+from torchinfo import summary
 from count_params import count_parameters
 from data import DistributedDataLoader
 
@@ -312,6 +313,8 @@ def main(cfg: DictConfig):
     # Wrap model in DDP
     model = DDP(model, device_ids=[ddp_local_rank], find_unused_parameters=cfg.distributed.find_unused_parameters)
     raw_model = model.module
+    print0(f'Num parameters: {sum(p.numel() for p in raw_model.parameters())}')
+    summary(raw_model, input_size=(48, 1024), depth=6, dtypes=[torch.int64])
     
     # Set up context manager for mixed precision
     ctx = torch.amp.autocast(device_type='cuda', dtype=getattr(torch, cfg.hardware.dtype))

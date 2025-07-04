@@ -1,5 +1,5 @@
 defaults:
- - mixing_layer: pom
+ - mixing_layer: headed_compom
  - _self_
  - gpt: d12
 
@@ -8,4 +8,6 @@ n_layer: 12
 n_head: 12
 degree: 2
 expand: 2
-n_embd: 768
+n_embd: 768 
+n_groups: 1
+n_sel_heads: 1536
