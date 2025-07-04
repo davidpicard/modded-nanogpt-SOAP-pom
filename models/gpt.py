@@ -269,12 +269,17 @@ class GPT(nn.Module):
         optimizers.append(lm_head_optimizer)
         
         # SOAP for transformer layers - use raw SOAP class like reference
-        transformer_optimizer = SOAP(
+        # transformer_optimizer = SOAP(
+        #     self.transformer.h.parameters(),
+        #     lr=learning_rate,
+        #     betas=(0.95, 0.95),  # Fixed betas for SOAP
+        #     weight_decay=weight_decay,  # No weight decay for transformer layers
+        #     precondition_frequency=precondition_frequency  # Fixed precondition frequency
+        # )
+        transformer_optimizer = AdamWOptimizer(
             self.transformer.h.parameters(),
             lr=learning_rate,
-            betas=(0.95, 0.95),  # Fixed betas for SOAP
-            weight_decay=weight_decay,  # No weight decay for transformer layers
-            precondition_frequency=precondition_frequency  # Fixed precondition frequency
+            weight_decay=weight_decay
         )
         optimizers.append(transformer_optimizer)
         
