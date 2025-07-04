@@ -307,7 +307,7 @@ class GPT(nn.Module):
         # AdamW for lm_head parameters (wte weights are tied to lm_head, so we only include lm_head)
         lm_head_optimizer = AdamWOptimizer(
             self.lm_head.parameters(),
-            lr=0.0018,  # Fixed learning rate for lm_head
+            lr=learning_rate,
             betas=betas,
             weight_decay=0  # No weight decay for lm_head
         )

@@ -21,6 +21,16 @@ evaluation:
   val_loss_every: 128
   val_max_steps: 20
   save_every: 0
+  # Text sampling configuration
+  sample_every: 512  # How often to generate text samples (defaults to val_loss_every)
+  num_unconditional_samples: 5  # Number of unconditional text samples
+  num_completion_samples: 5  # Number of completion samples from validation set
+  max_new_tokens: 128  # Maximum tokens to generate per sample
+  temperature: 1.0  # Sampling temperature
+  top_k: 50  # Top-k sampling parameter
+  prompt_length: 32  # Length of prompt for completion samples
+  sample_seed: 42  # Seed for reproducible text sampling
+  debug_sampling: false  # Print debug info for sampling consistency
 
 # Distributed training
 distributed:

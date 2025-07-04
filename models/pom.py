@@ -258,7 +258,7 @@ class PoM(nn.Module):
             xc = xq  # self-attention
 
         s = self.se_proj(xq)
-        xc = self.po_proj(xc)
+        xc = self.po_proj(xc.transpose(1, 2)).transpose(1, 2)
         h_current = polynomial_aggregation_(xc, self.order)
         n_current = h_current.shape[1]
 

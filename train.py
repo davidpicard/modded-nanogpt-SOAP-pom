@@ -13,6 +13,7 @@ from omegaconf import DictConfig, OmegaConf
 import hydra
 from hydra.utils import instantiate
 import wandb
+import tiktoken
 from rich.progress import Progress, TextColumn, BarColumn, TimeElapsedColumn, TimeRemainingColumn, MofNCompleteColumn, SpinnerColumn, ProgressColumn
 from rich.console import Console
 from rich.text import Text
@@ -20,6 +21,9 @@ from torchinfo import summary
 from count_params import count_parameters
 from data import DistributedDataLoader
 
+import os
+os.environ["TIKTOKEN_CACHE_DIR"] = ".tiktoken_cache"
+Path(".tiktoken_cache").mkdir(parents=True, exist_ok=True)
 # Set float32 matmul precision to match reference implementation
 torch.set_float32_matmul_precision('high')
 
@@ -75,6 +79,169 @@ def get_lr(step: int, num_iterations: int, warmup_iters: int, warmdown_iters: in
     else:
         decay_ratio = (num_iterations - step) / warmdown_iters
         return decay_ratio
+
+
+def sample_from_model(model, prompt_tokens=None, max_new_tokens=64, temperature=1.0, top_k=50, device='cuda', generator=None):
+    """
+    Sample text from the model.
+    
+    Args:
+        model: The GPT model
+        prompt_tokens: Optional tensor of prompt tokens. If None, starts with EOT token.
+        max_new_tokens: Maximum number of new tokens to generate
+        temperature: Sampling temperature
+        top_k: Number of top tokens to sample from
+        device: Device to run on
+        generator: torch.Generator for reproducible sampling
+        
+    Returns:
+        Tensor of generated tokens including prompt
+    """
+    # Get the original model (unwrap from compilation if needed)
+    original_model = model
+    if hasattr(model, '_orig_mod'):
+        # If the model is compiled, use the original uncompiled version for sampling
+        original_model = model._orig_mod
+    
+    original_model.eval()
+    
+    # Initialize tokenizer
+    enc = tiktoken.get_encoding("gpt2")
+    eot = enc._special_tokens['<|endoftext|>']
+    
+    with torch.no_grad():
+        # Start with prompt or EOT token
+        if prompt_tokens is None:
+            # Start with end of text token for unconditional generation
+            tokens = torch.tensor([[eot]], dtype=torch.long, device=device)
+        else:
+            tokens = prompt_tokens.clone().contiguous()  # Ensure contiguous memory layout
+        
+        for _ in range(max_new_tokens):
+            # Ensure tokens are contiguous before forward pass
+            tokens = tokens.contiguous()
+            
+            # Forward pass with original (uncompiled) model
+            logits, _ = original_model(tokens, targets=None, return_logits=True)
+            logits = logits[:, -1, :] / temperature  # Take last token and apply temperature
+            
+            # Apply top-k filtering
+            if top_k is not None:
+                v, _ = torch.topk(logits, min(top_k, logits.size(-1)))
+                logits[logits < v[:, [-1]]] = -float('inf')
+            
+            # Sample from the distribution
+            probs = torch.softmax(logits, dim=-1)
+            next_token = torch.multinomial(probs, num_samples=1, generator=generator)
+            
+            # Append to sequence and ensure contiguous layout
+            tokens = torch.cat([tokens, next_token], dim=1).contiguous()
+            
+            # Stop if we generate EOT token (except for the first token)
+            if tokens.shape[1] > 1 and next_token.item() == eot:
+                break
+    
+    # Clear GPU memory cache after sampling
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+    
+    # Restore training mode for the original model
+    original_model.train()
+    return tokens
+
+
+def generate_samples(model, val_loader, device='cuda', num_unconditional=3, num_completions=3, 
+                    max_new_tokens=64, temperature=1.0, top_k=50, prompt_length=32, base_seed=42, debug=False):
+    """
+    Generate text samples for logging.
+    
+    Args:
+        model: The GPT model
+        val_loader: Validation data loader
+        device: Device to run on
+        num_unconditional: Number of unconditional samples to generate
+        num_completions: Number of completion samples to generate
+        max_new_tokens: Maximum number of new tokens to generate
+        temperature: Sampling temperature
+        top_k: Number of top tokens to sample from
+        prompt_length: Length of prompt for completion samples
+        base_seed: Base seed for reproducible sampling
+        
+    Returns:
+        Dictionary with 'unconditional' and 'completions' lists
+    """
+    # Initialize tokenizer
+    enc = tiktoken.get_encoding("gpt2")
+    
+    samples = {'unconditional': [], 'completions': []}
+    
+    # Generate unconditional samples with consistent seeds
+    for i in range(num_unconditional):
+        # Create generator with specific seed for each unconditional sample
+        generator = torch.Generator(device=device)
+        generator.manual_seed(base_seed + i)
+        
+        tokens = sample_from_model(
+            model, 
+            prompt_tokens=None, 
+            max_new_tokens=max_new_tokens,
+            temperature=temperature,
+            top_k=top_k,
+            device=device,
+            generator=generator
+        )
+        text = enc.decode(tokens[0].cpu().numpy())
+        samples['unconditional'].append(text)
+    
+    # Generate completion samples from validation set
+    # Reset validation loader to ensure we always get the same first batch
+    val_loader.reset()
+    val_x, _ = val_loader.next_batch()
+    
+    # Debug: Print first few tokens of first sample to verify consistency
+    if debug and len(val_x) > 0:
+        first_tokens = val_x[0, :min(8, val_x.shape[1])].cpu().tolist()
+        print(f"Debug - First validation tokens: {first_tokens}")
+    
+    # Use consistent sample indices for reproducible prompts
+    completion_indices = list(range(min(num_completions, val_x.shape[0])))
+    
+    for i in completion_indices:
+        # Take first prompt_length tokens as prompt
+        prompt_tokens = val_x[i:i+1, :prompt_length]  # Keep batch dimension
+        
+        # Create generator with specific seed for each completion sample (offset from unconditional seeds)
+        generator = torch.Generator(device=device)
+        generator.manual_seed(base_seed + 1000 + i)
+        
+        # Generate completion
+        completion_tokens = sample_from_model(
+            model,
+            prompt_tokens=prompt_tokens,
+            max_new_tokens=max_new_tokens,
+            temperature=temperature,
+            top_k=top_k,
+            device=device,
+            generator=generator
+        )
+        
+        # Decode prompt and full completion separately for better display
+        prompt_text = enc.decode(prompt_tokens[0].cpu().numpy())
+        full_text = enc.decode(completion_tokens[0].cpu().numpy())
+        completion_text = full_text[len(prompt_text):]
+        
+        samples['completions'].append({
+            'prompt': prompt_text,
+            'completion': completion_text,
+            'full': full_text
+        })
+    
+    # Clean up memory after all sampling is complete
+    del val_x
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+    
+    return samples
 
 
 @hydra.main(version_base=None, config_path="config", config_name="config")
@@ -166,6 +333,10 @@ def main(cfg: DictConfig):
         log_dir.mkdir(parents=True, exist_ok=True)
         logfile = log_dir / "log.txt"
         logfile.touch()  # create empty log file
+        
+        # Set up checkpoint directory
+        checkpoint_dir = Path("checkpoints") / cfg.experiment_name
+        checkpoint_dir.mkdir(parents=True, exist_ok=True)
     
     # Set up rich progress bar (only for master process)
     console = Console()
@@ -206,13 +377,86 @@ def main(cfg: DictConfig):
             dist.all_reduce(val_loss, op=dist.ReduceOp.AVG)
             val_loss /= cfg.evaluation.val_max_steps
             
-            # Log validation loss to wandb
+            # Generate text samples (only on master process to avoid duplicate generations)
             if master_process:
-                wandb.log({"val_loss": val_loss.item(), "step": step})
-                print0(f"val loss {val_loss:.4f}")
-                if logfile is not None:
-                    with open(logfile, "a") as f:
-                        f.write(f"s:{step} tel:{val_loss}\n")
+                val_loader.reset()  # Reset val loader for sampling
+                
+                # Configure sampling parameters - can be added to config later
+                sample_every = getattr(cfg.evaluation, 'sample_every', cfg.evaluation.val_loss_every)
+                should_sample = (step % sample_every == 0) or last_step
+                
+                if should_sample:
+                    print0("Generating text samples...")
+                    # Reset validation loader to ensure consistent prompts across steps
+                    val_loader.reset()
+                    # Force the loader to the beginning and get a consistent state
+                    val_loader.current_shard = 0
+                    val_loader.current_position = val_loader.process_rank * val_loader.B * val_loader.T
+                    
+                    samples = generate_samples(
+                        raw_model,  # Use raw model without DDP wrapper
+                        val_loader,
+                        device=device,
+                        num_unconditional=getattr(cfg.evaluation, 'num_unconditional_samples', 3),
+                        num_completions=getattr(cfg.evaluation, 'num_completion_samples', 3),
+                        max_new_tokens=getattr(cfg.evaluation, 'max_new_tokens', 64),
+                        temperature=getattr(cfg.evaluation, 'temperature', 1.0),
+                        top_k=getattr(cfg.evaluation, 'top_k', 50),
+                        prompt_length=getattr(cfg.evaluation, 'prompt_length', 32),
+                        base_seed=getattr(cfg.evaluation, 'sample_seed', 42),
+                        debug=getattr(cfg.evaluation, 'debug_sampling', False)
+                    )
+                    
+                    # Log samples to console
+                    print0("\n" + "="*60)
+                    print0(f"TEXT SAMPLES AT STEP {step}")
+                    print0("="*60)
+                    
+                    print0("\nUNCONDITIONAL SAMPLES:")
+                    print0("-"*40)
+                    for i, text in enumerate(samples['unconditional']):
+                        print0(f"Sample {i+1}:")
+                        print0(repr(text))  # Use repr to show escape chars
+                        print0("")
+                    
+                    print0("\nCOMPLETION SAMPLES:")
+                    print0("-"*40)
+                    for i, sample in enumerate(samples['completions']):
+                        print0(f"Completion {i+1}:")
+                        print0(f"Prompt: {repr(sample['prompt'])}")
+                        print0(f"Generated: {repr(sample['completion'])}")
+                        print0("")
+                    
+                    # Log to wandb
+                    wandb_log = {
+                        "val_loss": val_loss.item(), 
+                        "step": step
+                    }
+                    
+                    # Add text samples to wandb
+                    for i, text in enumerate(samples['unconditional']):
+                        wandb_log[f"unconditional_sample_{i+1}"] = text
+                    
+                    for i, sample in enumerate(samples['completions']):
+                        wandb_log[f"completion_prompt_{i+1}"] = sample['prompt']
+                        wandb_log[f"completion_generated_{i+1}"] = sample['completion']
+                    
+                    wandb.log(wandb_log)
+                    
+                    print0("="*60)
+                    
+                    # Free memory after sampling
+                    del samples
+                    if torch.cuda.is_available():
+                        torch.cuda.empty_cache()
+                else:
+                    # Just log validation loss
+                    wandb.log({"val_loss": val_loss.item(), "step": step})
+            
+            print0(f"val loss {val_loss:.4f}")
+            if master_process and logfile is not None:
+                with open(logfile, "a") as f:
+                    f.write(f"s:{step} tel:{val_loss}\n")
         
         # Save checkpoint
         if master_process and (last_step or (cfg.evaluation.save_every > 0 and step % cfg.evaluation.save_every == 0)):
@@ -222,7 +466,7 @@ def main(cfg: DictConfig):
                 'model': raw_model.state_dict(),
                 'optimizer': optimizer.state_dict()
             }
-            torch.save(checkpoint, log_dir / f'state_step{step:06d}.pt')
+            torch.save(checkpoint, checkpoint_dir / "last.ckpt")
         
         if last_step:
             break
