@@ -211,6 +211,7 @@ class PoM(nn.Module):
             expand: The expansion factor for the polynomial order
             bias: Whether to include bias terms in linear projections
             n_groups: Number of convolution groups for polynomial computation
+            n_sel_heads: Number of selection heads
         """
         super().__init__()
         self.dim = dim
@@ -223,7 +224,7 @@ class PoM(nn.Module):
         
         # Linear projections
         self.po_proj = nn.Conv1d(dim, degree * expand * dim, kernel_size=1, bias=bias, groups=n_groups)
-        self.se_proj = nn.Linear(dim, n_groups, bias=bias)
+        self.se_proj = nn.Linear(dim, n_sel_heads, bias=bias)
         self.ag_proj = nn.Linear(degree * expand * dim, dim, bias=bias)
         self.pom = pom
 
@@ -245,7 +246,7 @@ class PoM(nn.Module):
 
         s = self.se_proj(xq)
         h = self.po_proj(xc.transpose(1, 2)).transpose(1, 2)
-        sh = self.pom(s, h, self.order, self.n_groups, mask)
+        sh = self.pom(s, h, self.order, self.n_sel_heads, mask)
 
         return self.ag_proj(sh)
 
@@ -280,5 +281,5 @@ class PoM(nn.Module):
 
         new_state = {'h': h, 'n': n_past + n_current}
 
-        sh = polynomial_selection_(s, h, self.n_groups)
+        sh = polynomial_selection_(s, h, self.n_sel_heads)
         return self.ag_proj(sh), new_state

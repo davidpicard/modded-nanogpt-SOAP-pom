@@ -62,7 +62,7 @@ def po4(x: torch.Tensor, coeff: torch.Tensor) -> torch.Tensor:
     h = gelu(x).unsqueeze(-1)
     h2 = h * h
     h3 = h2 * h
-    h4 = h2 * h2
+    h4 = h3 * h
     h = torch.cat([h, h2, h3, h4], dim=-1)
     return (h * coeff).sum(-1)
 
@@ -109,7 +109,7 @@ def polynomial_aggregation_(x: torch.Tensor, coeff: torch.Tensor, k: int, mask: 
     
     Args:
         x: Input tensor of shape (batch, seq_len, dim)
-        coeff: Polynomial coefficients of shape TODO
+        coeff: Polynomial coefficients of shape (dim, degree)
         k: Polynomial order (2, 3, 4, or higher)
         mask: Optional attention mask
         
@@ -126,7 +126,7 @@ def polynomial_aggregation_(x: torch.Tensor, coeff: torch.Tensor, k: int, mask: 
     else:
         # Generic case for k > 4
         h = gelu(x).unsqueeze(-1)
-        h = torch.cat([h ** i for i in range(k)], dim=-1)  # TODO vectorize
+        h = torch.cat([h ** i for i in range(k)], dim=-1)
         h = (h * coeff).sum(-1)
     
     # Apply masking if provided
@@ -149,15 +149,13 @@ def polynomial_selection_(x: torch.Tensor, h: torch.Tensor, n_sel_heads: int) ->
     Args:
         x: Query tensor
         h: Context tensor from polynomial aggregation
+        n_sel_heads: Number of selection heads
         
     Returns:
         Gated output tensor
     """
-    s = F.sigmoid(x).unsqueeze(-1)
-    orig_shape = h.shape
-    new_shape = (*h.shape[:-1], n_sel_heads, h.shape[-1] // n_sel_heads)
-    h = h.view(new_shape)
-    return (s * h).view(orig_shape)
+    head_dim = h.shape[-1] // n_sel_heads
+    return F.sigmoid(x).repeat_interleave(head_dim, dim=-1, output_size=h.shape[-1]) * h
 
 # =============================================================================
 # Main PoM Function
@@ -173,8 +171,9 @@ def pom(xq: torch.Tensor, xc: torch.Tensor, coeff: torch.Tensor, k: int, n_sel_h
     Args:
         xq: Query input tensor of shape (batch, query_len, dim)
         xc: Context input tensor of shape (batch, context_len, dim)
-        coeff: Polynomial coefficients of shape TODO
+        coeff: Polynomial coefficients of shape (dim, degree)
         k: Polynomial order (degree of interactions to capture)
+        n_sel_heads: Number of selection heads
         mask: Optional attention mask for masking specific positions
         
     Returns:
@@ -185,12 +184,12 @@ def pom(xq: torch.Tensor, xc: torch.Tensor, coeff: torch.Tensor, k: int, n_sel_h
     return o
 
 # =============================================================================
-# EffiPoM Module Class
+# ComPoM Module Class
 # =============================================================================
 
-class EffiPoM(nn.Module):
+class ComPoM(nn.Module):
     """
-    More efficient Polynomial Mixer (PoM) Module.
+    More compact Polynomial Mixer (PoM) Module.
     
     A custom neural network layer designed for capturing higher-order interactions 
     between input features through polynomial expansions. This module consists of
@@ -201,6 +200,7 @@ class EffiPoM(nn.Module):
         order (int): The order of the polynomial interactions to capture
         order_expand (int): The expansion factor for the polynomial order
         po_proj (nn.Linear): Linear projection for polynomial computation
+        po_coeff (nn.Parameter): Coefficients for polynomial computation
         se_proj (nn.Linear): Linear projection for selection mechanism
         ag_proj (nn.Linear): Linear projection for output aggregation
         pom (callable): The polynomial mixer operation function
@@ -215,6 +215,8 @@ class EffiPoM(nn.Module):
             degree: The degree of the polynomial to capture
             expand: The expansion factor for the polynomial order
             bias: Whether to include bias terms in linear projections
+            n_groups: Number of convolution groups for polynomial computation
+            n_sel_heads: Number of selection heads
         """
         super().__init__()
         self.dim = dim
@@ -227,7 +229,7 @@ class EffiPoM(nn.Module):
 
         # Linear projections
         self.po_proj = nn.Conv1d(dim, expand * dim, kernel_size=1, bias=bias, groups=n_groups)
-        self.po_coeff = nn.Parameter(torch.randn(0.02 * dim * expand, degree))
+        self.po_coeff = nn.Parameter(0.02 * torch.randn(dim * expand, degree))
         self.se_proj = nn.Linear(dim, n_sel_heads, bias=bias)
         self.ag_proj = nn.Linear(expand * dim, dim, bias=bias)
         self.pom = pom

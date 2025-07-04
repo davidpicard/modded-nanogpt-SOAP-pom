@@ -109,7 +109,7 @@ def polynomial_aggregation_(x: torch.Tensor, coeff: torch.Tensor, k: int, mask: 
     
     Args:
         x: Input tensor of shape (batch, seq_len, dim)
-        coeff: Polynomial coefficients of shape (batch, seq_len, dim)
+        coeff: Polynomial coefficients of shape (dim, degree)
         k: Polynomial order (2, 3, 4, or higher)
         mask: Optional attention mask
         
@@ -154,7 +154,7 @@ def pom(xc: torch.Tensor, coeff: torch.Tensor, k: int, mask: Optional[torch.Tens
     
     Args:
         xc: Context input tensor of shape (batch, context_len, dim)
-        coeff: Polynomial coefficients of shape (batch, context_len, dim)
+        coeff: Polynomial coefficients of shape (dim, degree)
         k: Polynomial order (degree of interactions to capture)
         mask: Optional attention mask for masking specific positions
         
