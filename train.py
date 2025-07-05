@@ -24,7 +24,7 @@ import os
 os.environ["TIKTOKEN_CACHE_DIR"] = ".tiktoken_cache"
 Path(".tiktoken_cache").mkdir(parents=True, exist_ok=True)
 # Set float32 matmul precision to match reference implementation
-torch.set_float32_matmul_precision('high')
+torch.set_float32_matmul_precision('medium')
 
 class SpeedColumn(ProgressColumn):
     """Custom column to display training speed"""
