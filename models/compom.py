@@ -210,7 +210,7 @@ class ComPoM(nn.Module):
         pom (callable): The polynomial mixer operation function
     """
 
-    def __init__(self, dim: int, degree: int, expand: int, n_groups: int, n_sel_heads: int, bias: bool = True):
+    def __init__(self, dim: int, degree: int, expand: int, n_groups: int, n_sel_heads: int, bias: bool = False):
         """
         Initialize the PoM module.
 
