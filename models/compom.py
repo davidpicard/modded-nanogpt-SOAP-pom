@@ -8,9 +8,8 @@ from typing import Optional, Tuple, Dict, Any
 # Core Polynomial Functions
 # =============================================================================
 
-def gelu(x: torch.Tensor) -> torch.Tensor:
-    """Apply GELU activation function with torch.compile optimization."""
-    return F.gelu(x)
+def pom_activation(x: torch.Tensor) -> torch.Tensor:
+    return F.leaky_relu(x, 0.01, True)
 
 
 def po2(x: torch.Tensor, coeff: torch.Tensor) -> torch.Tensor:
@@ -23,7 +22,7 @@ def po2(x: torch.Tensor, coeff: torch.Tensor) -> torch.Tensor:
     Returns:
         Tensor of shape (..., 2*dim) with polynomial interactions
     """
-    h = gelu(x).unsqueeze(-1)
+    h = pom_activation(x).unsqueeze(-1)
     h2 = h * h
     h = torch.cat([h, h2], dim=-1)
     return (h * coeff).sum(-1)
@@ -39,7 +38,7 @@ def po3(x: torch.Tensor, coeff: torch.Tensor) -> torch.Tensor:
     Returns:
         Tensor of shape (..., 3*dim) with polynomial interactions
     """
-    h = gelu(x).unsqueeze(-1)
+    h = pom_activation(x).unsqueeze(-1)
     h2 = h * h
     h3 = h2 * h
     h = torch.cat([h, h2, h3], dim=-1)
@@ -56,7 +55,7 @@ def po4(x: torch.Tensor, coeff: torch.Tensor) -> torch.Tensor:
     Returns:
         Tensor of shape (..., 4*dim) with polynomial interactions
     """
-    h = gelu(x).unsqueeze(-1)
+    h = pom_activation(x).unsqueeze(-1)
     h2 = h * h
     h3 = h2 * h
     h4 = h2 * h2
@@ -126,7 +125,7 @@ def polynomial_aggregation_(x: torch.Tensor, coeff: torch.Tensor, k: int,
         h = po4(x, coeff)
     else:
         # Generic case for k > 4
-        h = gelu(x).unsqueeze(-1)
+        h = pom_activation(x).unsqueeze(-1)
         h = torch.cat([h ** i for i in range(k)], dim=-1)  # TODO vectorize
         h = (h * coeff).sum(-1)
 
