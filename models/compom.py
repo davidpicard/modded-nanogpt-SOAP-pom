@@ -233,7 +233,7 @@ class ComPoM(nn.Module):
             self.po_proj = nn.Conv1d(dim, expand * dim, kernel_size=1, bias=bias, groups=n_groups)
         else:
             self.po_proj = nn.Linear(dim, expand * dim, bias=bias)
-        self.po_coeff = nn.Parameter((1.*torch.randn(dim * expand, degree)).clamp(-1., 1.))
+        self.po_coeff = nn.Parameter((2.*torch.randn(dim * expand, degree)).clamp(-2., 2.))
         self.se_proj = nn.Linear(dim, n_sel_heads, bias=bias)
         self.ag_proj = nn.Linear(expand * dim, dim, bias=bias)
         self.pom = pom
