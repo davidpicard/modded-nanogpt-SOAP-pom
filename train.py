@@ -67,6 +67,9 @@ def main(cfg: DictConfig):
 
     # Initialize model and data module
     model = LitGPT(instantiate(cfg.model.gpt), cfg=cfg)
+    if cfg.hardware.compile:
+        print(f"Compiling model!")
+        model.model.compile()
     data_module = GPTDataModule(cfg)
     # Train
     trainer.fit(model, data_module)
