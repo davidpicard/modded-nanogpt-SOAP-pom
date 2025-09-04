@@ -252,23 +252,21 @@ class GPT(nn.Module):
         Returns:
             Combined optimizer
         """
-        from models.optimizers.combined_optimizer import CombinedOptimizer
-        from models.optimizers.adamw_optimizer import AdamWOptimizer
-        from models.optimizers.soap import SOAP  # Import raw SOAP class
+        from torch.optim import AdamW   
+        # from models.optimizers.soap import SOAP  # Import raw SOAP class
         
-        # Create optimizers for different parameter groups
-        optimizers = []
+        # # Create optimizers for different parameter groups
+        # optimizers = []
         
-        # AdamW for lm_head parameters (wte weights are tied to lm_head, so we only include lm_head)
-        lm_head_optimizer = AdamWOptimizer(
-            self.lm_head.parameters(),
-            lr=learning_rate,
-            betas=betas,
-            weight_decay=0  # No weight decay for lm_head
-        )
-        optimizers.append(lm_head_optimizer)
-
-        # SOAP for transformer layers - use raw SOAP class like reference
+        # # AdamW for lm_head parameters (wte weights are tied to lm_head, so we only include lm_head)
+        # lm_head_optimizer = AdamW(
+        #     self.lm_head.parameters(),
+        #     lr=learning_rate,
+        #     betas=betas,
+        #     weight_decay=0  # No weight decay for lm_head
+        # )
+        # optimizers.append(lm_head_optimizer)
+        # # SOAP for transformer layers - use raw SOAP class like reference
         # transformer_optimizer = SOAP(
         #     self.transformer.h.parameters(),
         #     lr=learning_rate,
@@ -276,12 +274,25 @@ class GPT(nn.Module):
         #     weight_decay=weight_decay,  # No weight decay for transformer layers
         #     precondition_frequency=precondition_frequency  # Fixed precondition frequency
         # )
-        transformer_optimizer = AdamWOptimizer(
-            self.transformer.h.parameters(),
-            lr=learning_rate,
-            betas=(0.9, 0.95),
-            weight_decay=weight_decay
-        )
-        optimizers.append(transformer_optimizer)
+        # transformer_optimizer = AdamW(
+        #     self.transformer.h.parameters(),
+        #     lr=learning_rate,
+        #     betas=(0.9, 0.9999),
+        #     weight_decay=weight_decay
+        # )
+        # optimizers.append(transformer_optimizer)
+
+        optimizer = AdamW([{
+            'params': self.lm_head.parameters(),
+            'lr': learning_rate,
+            'betas': betas, 
+            'weight_decay': 0
+        },
+        {
+            'params': self.transformer.h.parameters(),
+            'lr': learning_rate,
+            'betas': betas, 
+            'weight_decay': weight_decay
+        }])
         
-        return CombinedOptimizer(optimizers) 
+        return optimizer

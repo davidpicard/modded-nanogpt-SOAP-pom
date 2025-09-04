@@ -2,7 +2,7 @@ import os
 import glob
 import numpy as np
 import torch
-import torch.distributed as dist
+from torch.utils.data import IterableDataset
 
 
 def _peek_data_shard(filename):
@@ -35,8 +35,8 @@ def _load_data_shard(filename):
     return tokens
 
 
-class DistributedDataLoader:
-    """Distributed data loader for training."""
+class DistributedDataLoader(IterableDataset):
+    """Distributed data loader implementing IterableDataset for PyTorch Lightning compatibility."""
     
     def __init__(self, filename_pattern: str, B: int, T: int, process_rank: int, num_processes: int):
         """
@@ -49,6 +49,7 @@ class DistributedDataLoader:
             process_rank: Rank of current process
             num_processes: Total number of processes
         """
+        super().__init__()
         self.B = B
         self.T = T
         self.process_rank = process_rank
@@ -97,4 +98,10 @@ class DistributedDataLoader:
         if self.current_position + (B * T * self.num_processes + 1) > len(self.tokens):
             self.advance()
         
-        return x.cuda(), y.cuda() 
+        return x.cuda(), y.cuda()
+
+    def __iter__(self):
+        """Iterator interface for PyTorch DataLoader."""
+        while True:
+            x, y = self.next_batch()
+            yield x, y

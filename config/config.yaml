@@ -8,21 +8,22 @@ defaults:
 # Training configuration
 training:
   batch_size: 48
-  accumulation: 2
+  accumulation: 16
   sequence_length: 1024
-  num_iterations: 750
-  learning_rate: 0.002
-  warmup_iters: 10
-  warmdown_iters: 0
+  num_iterations: 15000
+  learning_rate: 0.001
+  warmup_iters: 100
+  warmdown_iters: 5000
   weight_decay: 0.00001
+  grad_clip: 1.0  # Added gradient clipping value
 
 # Evaluation configuration
 evaluation:
-  val_loss_every: 128
-  val_max_steps: 20
+  val_loss_every: 256
+  val_max_steps: 40
   save_every: 0
   # Text sampling configuration
-  sample_every: 512  # How often to generate text samples (defaults to val_loss_every)
+  sample_every: 1024  # How often to generate text samples (defaults to val_loss_every)
   num_unconditional_samples: 5  # Number of unconditional text samples
   num_completion_samples: 5  # Number of completion samples from validation set
   max_new_tokens: 128  # Maximum tokens to generate per sample
@@ -40,12 +41,26 @@ distributed:
 # Logging
 logging:
   log_dir: logs
-  log_every: 1
+  log_every: 5
 
 # Hardware
 hardware:
   device: cuda
   dtype: bfloat16
   compile: false
+
+# Add new trainer section for Lightning configuration
+trainer:
+  accelerator: 'gpu'
+  devices: 1  # number of GPUs per node
+  num_nodes: 1  # number of nodes
+  gradient_clip_val: ${training.grad_clip}
+  accumulate_grad_batches: ${training.accumulation}
+  val_check_interval: ${evaluation.val_loss_every}
+  limit_val_batches: ${evaluation.val_max_steps}
+  num_sanity_val_steps: 0
+  log_every_n_steps: ${logging.log_every}
+  enable_progress_bar: true
+  deterministic: false
 
 experiment_name: baseline

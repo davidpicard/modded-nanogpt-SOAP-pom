@@ -1,7 +1,7 @@
-import torch
+from torch.optim import Optimizer
 
 
-class CombinedOptimizer:
+class CombinedOptimizer(Optimizer):
     """Combines multiple optimizers for different parameter groups."""
     
     def __init__(self, optimizers):
