@@ -21,12 +21,12 @@ def main(cfg: DictConfig):
     print(f"Running pytorch {torch.version.__version__}")
     
     # Initialize wandb (only on rank 0)
-    if cfg.trainer.devices == 1 or (hasattr(cfg.trainer, 'global_rank') and cfg.trainer.global_rank == 0):
-        wandb.init(
-            project="pom_archi",
-            config=dict(cfg),
-            name=cfg.experiment_name
-        )
+    # if cfg.trainer.devices == 1 or (hasattr(cfg.trainer, 'global_rank') and cfg.trainer.global_rank == 0):
+    wandb.init(
+        project="pom_archi",
+        config=dict(cfg),
+        name=cfg.experiment_name
+    )
 
 
     # Initialize callbacks
