@@ -2,6 +2,9 @@ import os
 import uuid
 from pathlib import Path
 import torch
+torch.backends.cuda.matmul.allow_tf32 = True
+torch.backends.cudnn.allow_tf32 = True
+torch.set_float32_matmul_precision("medium")
 import wandb
 from omegaconf import DictConfig
 import hydra
