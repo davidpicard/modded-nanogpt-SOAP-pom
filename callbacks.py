@@ -1,8 +1,12 @@
 import pytorch_lightning as pl
 import torch
 import wandb
-import tiktoken
 from typing import Any, Dict, List
+import os
+from pathlib import Path
+Path(".tiktoken_cache").mkdir(parents=True, exist_ok=True)
+os.environ["TIKTOKEN_CACHE_DIR"] = ".tiktoken_cache"
+import tiktoken
 
 class TextGenerationCallback(pl.Callback):
     def __init__(
