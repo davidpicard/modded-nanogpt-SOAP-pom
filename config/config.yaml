@@ -19,11 +19,11 @@ training:
 
 # Evaluation configuration
 evaluation:
-  val_loss_every: 256
+  val_loss_every: 250
   val_max_steps: 40
-  save_every: 0
+  save_every: 1000
   # Text sampling configuration
-  sample_every: 1024  # How often to generate text samples (defaults to val_loss_every)
+  sample_every: 500  # How often to generate text samples (defaults to val_loss_every)
   num_unconditional_samples: 5  # Number of unconditional text samples
   num_completion_samples: 5  # Number of completion samples from validation set
   max_new_tokens: 128  # Maximum tokens to generate per sample
