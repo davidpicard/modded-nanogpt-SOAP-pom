@@ -31,6 +31,7 @@ class TextGenerationCallback(pl.Callback):
         self.base_seed = base_seed
         self.enc = tiktoken.get_encoding("gpt2")
         self.eot = self.enc._special_tokens['<|endoftext|>']
+        self.last_step = 0
 
     def _sample_from_model(
         self,
@@ -127,7 +128,7 @@ class TextGenerationCallback(pl.Callback):
             return
 
         step = trainer.global_step
-        if step > 0 and step % self.every_n_steps == 0:
+        if step > self.last_step and step % self.every_n_steps == 0:
             samples = self._generate_samples(
                 pl_module,
                 trainer.datamodule.val_loader,
@@ -161,6 +162,9 @@ class TextGenerationCallback(pl.Callback):
 
             # Clear GPU memory
             torch.cuda.empty_cache()
+
+            # store this step
+            self.last_step = step
 
 class WandBLoggingCallback(pl.Callback):
     def __init__(self, log_every_n_steps: int = 1):
