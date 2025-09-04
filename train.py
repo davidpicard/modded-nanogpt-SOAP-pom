@@ -11,6 +11,7 @@ import hydra
 from hydra.utils import instantiate
 import pytorch_lightning as pl
 from pytorch_lightning.strategies import DDPStrategy
+from pytorch_lightning.utilities import rank_zero_only
 from lit_module import LitGPT
 from lit_data import GPTDataModule
 from callbacks import TextGenerationCallback, WandBLoggingCallback
@@ -22,7 +23,7 @@ def main(cfg: DictConfig):
     
     # Initialize wandb (only on rank 0)
     # if cfg.trainer.devices == 1 or (hasattr(cfg.trainer, 'global_rank') and cfg.trainer.global_rank == 0):
-    wandb.init(
+    rank_zero_only(wandb.init)(
         project="pom_archi",
         config=dict(cfg),
         name=cfg.experiment_name
