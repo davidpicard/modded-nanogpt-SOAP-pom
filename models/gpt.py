@@ -168,11 +168,13 @@ class Block(nn.Module):
             elif isinstance(module, nn.Embedding):
                 nn.init.normal_(module.weight, mean=0, std=1)
         self.mlp = MLP(n_embd)
-        self.attn_scale = (1 / (2 * n_layer)**0.5)
+        # self.attn_scale = (1 / (2 * n_layer)**0.5)
+        self.attn_scale = nn.Parameter(torch.ones((1, 1, n_embd))*(1 / (2 * n_layer)**0.5), requires_grad=True)
+        self.mlp_scale = nn.Parameter(torch.ones((1, 1, n_embd)) * (1 / (2 * n_layer) ** 0.5), requires_grad=True)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = x + self.attn_scale * self.attn(rmsnorm(x))
-        x = x + self.mlp(rmsnorm(x))
+        x = x + self.mlp_scale * self.mlp(rmsnorm(x))
         return x
 
 
