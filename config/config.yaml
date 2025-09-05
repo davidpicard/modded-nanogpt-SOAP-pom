@@ -24,6 +24,7 @@ evaluation:
   save_every: 1000
   # Text sampling configuration
   sample_every: 500  # How often to generate text samples (defaults to val_loss_every)
+  hellaswag_every: 500 # how often to compute HellaSwag accuracy
   num_unconditional_samples: 5  # Number of unconditional text samples
   num_completion_samples: 5  # Number of completion samples from validation set
   max_new_tokens: 128  # Maximum tokens to generate per sample

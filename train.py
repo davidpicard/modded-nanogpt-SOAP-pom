@@ -2,6 +2,9 @@ import os
 import uuid
 from pathlib import Path
 import torch
+
+from callbacks.hellaswag import HellaSwagCallback
+
 torch.backends.cuda.matmul.allow_tf32 = True
 torch.backends.cudnn.allow_tf32 = True
 torch.set_float32_matmul_precision("high")
@@ -41,6 +44,10 @@ def main(cfg: DictConfig):
             top_k=cfg.evaluation.top_k,
             prompt_length=cfg.evaluation.prompt_length,
             base_seed=cfg.evaluation.sample_seed
+        ),
+        HellaSwagCallback(
+            every_n_steps=cfg.evaluation.hellaswag_every,
+            base_seed=3407
         ),
         WandBLoggingCallback(log_every_n_steps=cfg.logging.log_every),
         pl.callbacks.ModelCheckpoint(
