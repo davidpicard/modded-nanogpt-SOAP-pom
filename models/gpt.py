@@ -61,24 +61,6 @@ def apply_rotary_emb(x, cos, sin):
     return torch.cat([y1, y2], 3)
 
 
-class CausalSelfPoM(nn.Module):
-    """Causal self-attention using Polynomial Mixer."""
-    
-    def __init__(self, n_embd, degree, expand, n_head):
-        super().__init__()
-        self.degree = degree
-        self.expand = expand
-        self.n_head = n_head
-        self.n_embd = n_embd
-        self.head_dim = self.n_embd // self.n_head
-        self.pom = pom.PoM(self.n_embd, self.degree, self.expand, self.n_head, False)
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        B, T, C = x.size()
-        mask = torch.tril(torch.ones((T, T))).unsqueeze(0)
-        return self.pom(x, x, mask)
-
-
 class CausalSelfComPoM(nn.Module):
     """Causal self-attention using Polynomial Mixer."""
 
@@ -91,10 +73,14 @@ class CausalSelfComPoM(nn.Module):
         self.n_groups = n_groups
         self.head_dim = self.n_embd // self.n_head
         self.pom = compom.ComPoM(self.n_embd, self.degree, self.expand, self.n_groups, self.n_head, False)
+        self.rotary = Rotary(self.n_embd)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         B, T, C = x.size()
         mask = torch.tril(torch.ones((T, T))).unsqueeze(0)
+        x = x.view(B, T, 1, C)
+        cos, sin = self.rotary(x)
+        x = apply_rotary_emb(x, cos, sin).view(B, T, C)
         return self.pom(x, x, mask)
 
 class CausalSelfAttention(nn.Module):
@@ -215,11 +201,11 @@ class GPT(nn.Module):
         # forward the GPT model itself
         x = self.transformer.wte(idx)  # token embeddings of shape (b, t, n_embd)
 
-        B, T, C = x.shape
-        x = x.view(B, T, self.n_head, self.head_dim)
-        cos, sin = self.rotary(x)
-        x = apply_rotary_emb(x, cos, sin)
-        x = x.view(B, T, C)
+        # B, T, C = x.shape
+        # x = x.view(B, T, self.n_head, self.head_dim)
+        # cos, sin = self.rotary(x)
+        # x = apply_rotary_emb(x, cos, sin)
+        # x = x.view(B, T, C)
 
         for block in self.transformer.h:
             x = block(x)
