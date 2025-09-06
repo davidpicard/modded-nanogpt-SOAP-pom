@@ -7,7 +7,7 @@ from torch.optim import Optimizer
 class SpikeDetectorCallback(pl.Callback):
     def __init__(
         self,
-        buffer_size: int = 25
+        buffer_size: int = 40
     ):
         super().__init__()
         self.buffer_size = buffer_size
