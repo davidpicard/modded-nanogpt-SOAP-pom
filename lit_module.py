@@ -21,16 +21,18 @@ class LitGPT(pl.LightningModule):
     def training_step(self, batch, batch_idx):
         x, y = batch
         _, loss = self(x, y)
+        to_add = True
         if len(self.loss_buffer) >= self.len_buffer:
             m = np.mean(self.loss_buffer)
             s = np.std(self.loss_buffer)
-            if loss.item() > m+4.*s:
+            if loss.item() > m+6.*s:
                 print(f"loss spike: {loss.item()} m: {m} s: {s}")
                 loss = 0.*loss + m
-
+                to_add = False
             self.log('m', m, prog_bar=True, sync_dist=True)
             self.log('s', s, prog_bar=True, sync_dist=True)
-        self.loss_buffer.append(loss.item())
+        if to_add:
+            self.loss_buffer.append(loss.item())
         if len(self.loss_buffer) > self.len_buffer:
             self.loss_buffer.pop(0)
 
