@@ -15,7 +15,7 @@ training:
   warmup_iters: 100
   warmdown_iters: 5000
   weight_decay: 0.00001
-  grad_clip: 1.0  # Added gradient clipping value
+  grad_clip: 0.5  # Added gradient clipping value
 
 # Evaluation configuration
 evaluation:
