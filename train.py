@@ -1,9 +1,6 @@
 import os
 import uuid
-from pathlib import Path
 import torch
-
-from callbacks.hellaswag import HellaSwagCallback
 
 torch.backends.cuda.matmul.allow_tf32 = True
 torch.backends.cudnn.allow_tf32 = True
@@ -18,6 +15,8 @@ from pytorch_lightning.utilities import rank_zero_only
 from lit_module import LitGPT
 from lit_data import GPTDataModule
 from callbacks import TextGenerationCallback, WandBLoggingCallback
+from callbacks.hellaswag import HellaSwagCallback
+from callbacks.spike_detector import SpikeDetectorCallback
 
 @hydra.main(version_base=None, config_path="config", config_name="config")
 def main(cfg: DictConfig):
@@ -35,6 +34,7 @@ def main(cfg: DictConfig):
 
     # Initialize callbacks
     callbacks = [
+        SpikeDetectorCallback(),
         TextGenerationCallback(
             every_n_steps=cfg.evaluation.sample_every,
             num_unconditional=cfg.evaluation.num_unconditional_samples,
