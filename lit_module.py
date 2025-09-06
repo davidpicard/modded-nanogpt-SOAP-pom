@@ -1,5 +1,6 @@
 import pytorch_lightning as pl
 import torch
+import numpy as np
 
 class LitGPT(pl.LightningModule):
     def __init__(self, model, cfg):
@@ -11,6 +12,8 @@ class LitGPT(pl.LightningModule):
         self.model = model
         self.save_hyperparameters(ignore=['model'])
         self.cfg = cfg
+        self.loss_buffer = []
+        self.len_buffer = 50
 
     def forward(self, idx, targets=None, return_logits=False):
         return self.model(idx, targets, return_logits)
@@ -18,6 +21,14 @@ class LitGPT(pl.LightningModule):
     def training_step(self, batch, batch_idx):
         x, y = batch
         _, loss = self(x, y)
+        if len(self.loss_buffer) >= self.len_buffer:
+            m = np.mean(self.loss_buffer)
+            s = np.std(self.loss_buffer)
+            loss.clamp(max=(m+6.*s))
+        self.loss_buffer.append(loss.item())
+        if len(self.loss_buffer) > self.len_buffer:
+            self.loss_buffer.pop(0)
+
         self.log('train_loss', loss, prog_bar=True, sync_dist=True)
         return loss
 

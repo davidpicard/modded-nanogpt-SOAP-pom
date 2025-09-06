@@ -34,7 +34,7 @@ def main(cfg: DictConfig):
 
     # Initialize callbacks
     callbacks = [
-        SpikeDetectorCallback(),
+        # SpikeDetectorCallback(),
         TextGenerationCallback(
             every_n_steps=cfg.evaluation.sample_every,
             num_unconditional=cfg.evaluation.num_unconditional_samples,
