@@ -27,7 +27,7 @@ class LitGPT(pl.LightningModule):
             s = np.std(self.loss_buffer)
             if loss.item() > m+6.*s:
                 print(f"loss spike: {loss.item()} m: {m} s: {s}")
-                loss = 0.*loss + m
+                loss = loss * m/loss.detach()
                 to_add = False
             self.log('m', m, prog_bar=True, sync_dist=True)
             self.log('s', s, prog_bar=True, sync_dist=True)
