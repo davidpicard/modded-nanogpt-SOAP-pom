@@ -24,7 +24,12 @@ class LitGPT(pl.LightningModule):
         if len(self.loss_buffer) >= self.len_buffer:
             m = np.mean(self.loss_buffer)
             s = np.std(self.loss_buffer)
-            loss.clamp(max=(m+6.*s))
+            if loss.item() > m+4.*s:
+                print(f"loss spike: {loss.item()} m: {m} s: {s}")
+                loss = 0.*loss + m
+
+            self.log('m', m, prog_bar=True, sync_dist=True)
+            self.log('s', s, prog_bar=True, sync_dist=True)
         self.loss_buffer.append(loss.item())
         if len(self.loss_buffer) > self.len_buffer:
             self.loss_buffer.pop(0)
