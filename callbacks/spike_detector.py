@@ -19,7 +19,7 @@ class SpikeDetectorCallback(pl.Callback):
         if len(self.buffer) >= self.buffer_size:
             mean = np.mean(self.buffer)
             sdev = np.std(self.buffer)
-            if loss > mean + 4*sdev:
+            if loss > mean + 6*sdev:
                 print(f"Spike detected! l: {loss:.4f} m: {mean:.4f} s: {sdev:.4f}")
                 self.do_step = False
                 add_loss = False
