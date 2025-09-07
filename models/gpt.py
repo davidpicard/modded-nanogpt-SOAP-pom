@@ -8,7 +8,7 @@ from copy import deepcopy
 from models import compom
 
 
-def rmsnorm(x0, eps=1e-6):
+def rmsnorm(x0, eps=1e-3):
     """RMS normalization function (matching reference implementation)."""
     x = x0.float()
     x = x * torch.rsqrt(x.pow(2).mean(-1, keepdim=True) + eps)
@@ -18,7 +18,7 @@ def rmsnorm(x0, eps=1e-6):
 class RMSNorm(nn.Module):
     """RMS normalization module."""
     
-    def __init__(self, eps: float = 1e-6):
+    def __init__(self, eps: float = 1e-3):
         super().__init__()
         self.eps = eps
     
