@@ -25,12 +25,15 @@ class LitGPT(pl.LightningModule):
         if len(self.loss_buffer) >= self.len_buffer:
             m = np.mean(self.loss_buffer)
             s = np.std(self.loss_buffer)
-            if loss.item() > m+6.*s:
-                print(f"loss spike: {loss.item()} m: {m} s: {s}")
-                loss = loss * m/loss.detach()
+            if loss.mean().item() > m+6.*s:
+                cond = loss > m + 6. * s
+                print(f"{cond.sum()} loss spikes! avg: {loss.mean().item()} max: {loss.max().item()} m: {m} s: {s}")
+                re_loss = (loss * m/loss.detach())
+                loss = torch.where(cond, re_loss, loss)
                 to_add = False
             self.log('m', m, prog_bar=True, sync_dist=True)
             self.log('s', s, prog_bar=True, sync_dist=True)
+        loss = loss.mean()
         if to_add:
             self.loss_buffer.append(loss.item())
         if len(self.loss_buffer) > self.len_buffer:
@@ -42,6 +45,7 @@ class LitGPT(pl.LightningModule):
     def validation_step(self, batch, batch_idx):
         x, y = batch
         _, loss = self(x, y)
+        loss = loss.mean()
         self.log('val_loss', loss, prog_bar=True, sync_dist=True)
         return loss
 
