@@ -8,24 +8,26 @@ from copy import deepcopy
 from models import compom
 
 
-def rmsnorm(x0, eps=1e-3):
+def rmsnorm(x0, eps=1e-6):
     """RMS normalization function (matching reference implementation)."""
     x = x0.float()
-    x = x * torch.rsqrt(x.pow(2).mean(-1, keepdim=True) + eps)
+    n = torch.sqrt(x.pow(2).mean(-1, keepdim=True))
+    x = torch.where(n<1., x, x/(n+eps)) # norm only big elements
+    # x = x * torch.rsqrt(x.pow(2).mean(-1, keepdim=True) + eps)
     return x.type_as(x0)
 
 
-class RMSNorm(nn.Module):
-    """RMS normalization module."""
-    
-    def __init__(self, eps: float = 1e-3):
-        super().__init__()
-        self.eps = eps
-    
-    def forward(self, x0: torch.Tensor) -> torch.Tensor:
-        x = x0.float()
-        x = x * torch.rsqrt(x.pow(2).mean(-1, keepdim=True) + self.eps)
-        return x.type_as(x0)
+# class RMSNorm(nn.Module):
+#     """RMS normalization module."""
+#
+#     def __init__(self, eps: float = 1e-3):
+#         super().__init__()
+#         self.eps = eps
+#
+#     def forward(self, x0: torch.Tensor) -> torch.Tensor:
+#         x = x0.float()
+#         x = x * torch.rsqrt(x.pow(2).mean(-1, keepdim=True) + self.eps)
+#         return x.type_as(x0)
 
 
 class Rotary(torch.nn.Module):
@@ -274,13 +276,15 @@ class GPT(nn.Module):
             'params': self.lm_head.parameters(),
             'lr': learning_rate,
             'betas': betas, 
-            'weight_decay': 0
+            'weight_decay': 0,
+            'eps': 1e-15
         },
         {
             'params': self.transformer.h.parameters(),
             'lr': learning_rate,
             'betas': betas, 
-            'weight_decay': weight_decay
+            'weight_decay': weight_decay,
+            'eps': 1e-15
         }])
         
         return optimizer
