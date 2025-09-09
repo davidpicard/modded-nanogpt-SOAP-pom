@@ -54,7 +54,7 @@ class LitGPT(pl.LightningModule):
         optimizer = self.model.configure_optimizers(
             weight_decay=self.cfg.training.weight_decay,
             learning_rate=self.cfg.training.learning_rate,
-            betas=(0.9, 0.99)
+            betas=(0.9, 0.9999)
         )
         
         opt_dict = {
