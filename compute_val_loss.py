@@ -8,6 +8,7 @@ import sys
 import pytorch_lightning as pl
 from tqdm import tqdm
 
+from callbacks import HellaSwagCallback
 from lit_data import GPTDataModule
 from lit_module import LitGPT
 torch.set_float32_matmul_precision('medium')
@@ -38,6 +39,16 @@ def main(cfg: DictConfig):
     )
 
     trainer.validate(model=model, datamodule=data_module, verbose=True)
+
+    hell = HellaSwagCallback(0)
+    mod = model.model
+    mod.eval()
+    hell.examples = hell.examples[0:1000]
+    res = hell.evaluate(mod, device=model.device)
+    print({
+        "hellaswag_acc": res['acc'],
+        "hellaswag_acc_norm": res['acc_norm']
+    })
 
 
 if __name__ == "__main__":
