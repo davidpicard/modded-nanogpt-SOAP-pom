@@ -47,7 +47,7 @@ logging:
 # Hardware
 hardware:
   device: cuda
-  dtype: bfloat16
+  precision: bf16-mixed
   compile: false
 
 # Add new trainer section for Lightning configuration

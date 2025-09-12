@@ -68,7 +68,7 @@ def main(cfg: DictConfig):
             process_group_backend=cfg.distributed.backend,
             find_unused_parameters=cfg.distributed.find_unused_parameters
         ),
-        precision=16 if cfg.hardware.dtype == 'float16' else 32,
+        precision=cfg.hardware.precision,
         **cfg.trainer
     )
 
