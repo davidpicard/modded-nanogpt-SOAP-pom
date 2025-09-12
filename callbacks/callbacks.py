@@ -234,6 +234,10 @@ class WandBLoggingCallback(pl.Callback):
             self._total_val_loss = 0.0
             self._val_steps = 0
 
+    def on_validation_start(self, trainer: "pl.Trainer", pl_module: "pl.LightningModule") -> None:
+        # print(f"reset val dataloader")
+        trainer.val_dataloaders.reset()
+
     def on_train_start(
         self,
         trainer: pl.Trainer,
