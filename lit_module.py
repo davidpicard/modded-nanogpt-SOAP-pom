@@ -1,3 +1,5 @@
+import math
+
 import pytorch_lightning as pl
 import torch
 import numpy as np
@@ -79,5 +81,9 @@ class LitGPT(pl.LightningModule):
             decay_ratio = float(
                 self.cfg.training.num_iterations - step
             ) / float(self.cfg.training.warmdown_iters)
-            return max(0.0, decay_ratio)
+            decay_ratio = float(step - self.cfg.training.warmup_iters)/(self.cfg.training.num_iterations - self.cfg.training.warmup_iters)
+            assert (0.0 <= decay_ratio) and (decay_ratio <= 1.0)
+            coeff = 0.5 * (1.0 + math.cos(math.pi * decay_ratio))
+            return coeff
         return 1.0
+
