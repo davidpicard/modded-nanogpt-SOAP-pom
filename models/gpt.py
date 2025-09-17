@@ -78,9 +78,9 @@ class CausalSelfComPoM(nn.Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         B, T, C = x.size()
         mask = torch.tril(torch.ones((T, T))).unsqueeze(0)
-        x = x.view(B, T, 1, C)
-        cos, sin = self.rotary(x)
-        x = apply_rotary_emb(x, cos, sin).view(B, T, C)
+        # x = x.view(B, T, 1, C)
+        # cos, sin = self.rotary(x)
+        # x = apply_rotary_emb(x, cos, sin).view(B, T, C)
         return self.pom(x, x, mask)
 
 class CausalSelfAttention(nn.Module):
@@ -167,9 +167,10 @@ class Block(nn.Module):
 class GPT(nn.Module):
     """GPT model with Polynomial Mixer attention."""
     
-    def __init__(self, mixing_layer, vocab_size: int = 50257, n_layer: int = 12, n_head: int = 12, n_embd: int = 768):
+    def __init__(self, mixing_layer, vocab_size: int = 50257, seq_length: int = 1024, n_layer: int = 12, n_head: int = 12, n_embd: int = 768):
         super().__init__()
         self.vocab_size = vocab_size
+        self.seq_length = seq_length
         self.n_layer = n_layer
         self.n_head = n_head
         self.n_embd = n_embd
@@ -177,6 +178,7 @@ class GPT(nn.Module):
 
         self.transformer = nn.ModuleDict(dict(
             wte=nn.Embedding(self.vocab_size, self.n_embd),
+            wpe=nn.Embedding(self.seq_length, self.n_embd),
             h=nn.ModuleList([Block(mixing_layer, self.n_embd, self.n_layer) for _ in range(self.n_layer)]),
         ))
         self.lm_head = nn.Linear(self.n_embd, self.vocab_size, bias=False)
@@ -200,12 +202,8 @@ class GPT(nn.Module):
 
         # forward the GPT model itself
         x = self.transformer.wte(idx)  # token embeddings of shape (b, t, n_embd)
-
-        # B, T, C = x.shape
-        # x = x.view(B, T, self.n_head, self.head_dim)
-        # cos, sin = self.rotary(x)
-        # x = apply_rotary_emb(x, cos, sin)
-        # x = x.view(B, T, C)
+        pos_emb = self.transformer.wpe(pos)  # position embeddings of shape (t, n_embd)
+        x = x + pos_emb
 
         for block in self.transformer.h:
             x = block(x)
@@ -274,6 +272,12 @@ class GPT(nn.Module):
             'params': self.lm_head.parameters(),
             'lr': learning_rate,
             'betas': betas, 
+            'weight_decay': 0
+        },
+        {
+            'params': self.transformer.wpe.parameters(),
+            'lr': learning_rate,
+            'betas': betas,
             'weight_decay': 0
         },
         {

@@ -9,6 +9,7 @@ model:
     _target_: models.gpt.GPT
     mixing_layer: ${model.mixing_layer}
     vocab_size: ${model.vocab_size}
+    seq_length: ${model.seq_length}
     n_layer: ${model.n_layer}
     n_head: ${model.n_head}
     n_embd: ${model.n_embd}
