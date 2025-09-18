@@ -4,6 +4,9 @@ import torch.nn.functional as F
 import torch._dynamo
 from typing import Optional, Tuple, Dict, Any
 
+from torch.nn import LayerNorm
+
+
 # =============================================================================
 # Core Polynomial Functions
 # =============================================================================
@@ -209,7 +212,7 @@ class ComPoM(nn.Module):
         pom (callable): The polynomial mixer operation function
     """
 
-    def __init__(self, dim: int, degree: int, expand: int, n_groups: int, n_sel_heads: int, bias: bool = False):
+    def __init__(self, dim: int, degree: int, expand: int, n_groups: int, n_sel_heads: int, bias: bool = False, layernorm=False):
         """
         Initialize the PoM module.
 
@@ -237,6 +240,11 @@ class ComPoM(nn.Module):
         self.se_proj = nn.Linear(dim, n_sel_heads, bias=bias)
         self.ag_proj = nn.Linear(expand * dim, dim, bias=bias)
         self.pom = pom
+        self.layernorm = layernorm
+        if layernorm:
+            print(f"using layernorm!")
+            self.ln = LayerNorm(expand*dim//n_sel_heads, elementwise_affine=False, bias=False)
+
 
     def forward(self, xq: torch.Tensor, xc: Optional[torch.Tensor] = None,
                 mask: Optional[torch.Tensor] = None) -> torch.Tensor:
@@ -259,6 +267,9 @@ class ComPoM(nn.Module):
             h = self.po_proj(xc.transpose(1, 2)).transpose(1, 2)
         else:
             h = self.po_proj(xc)
+        if self.layernorm:
+            b, n, d = h.shape
+            h = self.ln(h.view(b, n, self.n_sel_heads, -1)).view(b, n, d)
         sh = self.pom(s, h, self.po_coeff, self.order, self.n_sel_heads, mask)
 
         return self.ag_proj(sh)

@@ -64,7 +64,7 @@ def apply_rotary_emb(x, cos, sin):
 class CausalSelfComPoM(nn.Module):
     """Causal self-attention using Polynomial Mixer."""
 
-    def __init__(self, n_embd, degree, expand, n_head, n_groups):
+    def __init__(self, n_embd, degree, expand, n_head, n_groups, layernorm=False):
         super().__init__()
         self.degree = degree
         self.expand = expand
@@ -72,8 +72,8 @@ class CausalSelfComPoM(nn.Module):
         self.n_embd = n_embd
         self.n_groups = n_groups
         self.head_dim = self.n_embd // self.n_head
-        self.pom = compom.ComPoM(self.n_embd, self.degree, self.expand, self.n_groups, self.n_head, False)
-        self.rotary = Rotary(self.n_embd)
+        self.pom = compom.ComPoM(self.n_embd, self.degree, self.expand, self.n_groups, self.n_head, False, layernorm=layernorm)
+        # self.rotary = Rotary(self.n_embd)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         B, T, C = x.size()
@@ -183,7 +183,7 @@ class GPT(nn.Module):
         ))
         self.lm_head = nn.Linear(self.n_embd, self.vocab_size, bias=False)
         self.transformer.wte.weight = self.lm_head.weight  # weight tying
-        self.rotary = Rotary(self.head_dim)
+        # self.rotary = Rotary(self.head_dim)
 
     def forward(self, idx: torch.Tensor, targets: torch.Tensor = None, return_logits: bool = True):
         """
