@@ -4,6 +4,7 @@ defaults:
  - gpt: d12
 
 vocab_size: 50257
+seq_length: ${training.sequence_length}
 n_layer: 12
 n_head: 12
 degree: 2
