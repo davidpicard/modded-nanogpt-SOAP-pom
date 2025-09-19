@@ -64,7 +64,7 @@ def apply_rotary_emb(x, cos, sin):
 class CausalSelfComPoM(nn.Module):
     """Causal self-attention using Polynomial Mixer."""
 
-    def __init__(self, n_embd, degree, expand, n_head, n_groups, layernorm=False):
+    def __init__(self, n_embd, degree, expand, n_head, n_groups, layernorm=False, use_rope: bool = True):
         super().__init__()
         self.degree = degree
         self.expand = expand
@@ -72,7 +72,7 @@ class CausalSelfComPoM(nn.Module):
         self.n_embd = n_embd
         self.n_groups = n_groups
         self.head_dim = self.n_embd // self.n_head
-        self.pom = compom.ComPoM(self.n_embd, self.degree, self.expand, self.n_groups, self.n_head, False, layernorm=layernorm)
+        self.pom = compom.ComPoM(self.n_embd, self.degree, self.expand, self.n_groups, self.n_head, False, layernorm=layernorm, use_rope=use_rope)
         # self.rotary = Rotary(self.n_embd)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -85,7 +85,7 @@ class CausalSelfComPoM(nn.Module):
 
 class CausalSelfAttention(nn.Module):
 
-    def __init__(self, n_embd, degree, expand, n_head):
+    def __init__(self, n_embd, degree, expand, n_head, use_rope: bool = True):
         super().__init__()
         self.degree = degree
         self.expand = expand
@@ -97,7 +97,9 @@ class CausalSelfAttention(nn.Module):
         self.c_attn = nn.Linear(self.n_embd, 3 * self.n_embd, bias=False)
         # output projection
         self.c_proj = nn.Linear(self.n_embd, self.n_embd, bias=False)
-        # self.rotary = Rotary(self.head_dim)
+        self.use_rope = use_rope
+        if use_rope:
+            self.rotary = Rotary(self.head_dim)
 
     def forward(self, x):
         B, T, C = x.size() # batch size, sequence length, embedding dimensionality (n_embd)
@@ -107,9 +109,10 @@ class CausalSelfAttention(nn.Module):
         k = k.view(B, T, self.n_head, self.head_dim)
         q = q.view(B, T, self.n_head, self.head_dim)
         v = v.view(B, T, self.n_head, self.head_dim)
-        # cos, sin = self.rotary(q)
-        # q = apply_rotary_emb(q, cos, sin)
-        # k = apply_rotary_emb(k, cos, sin)
+        if self.use_rope:
+            cos, sin = self.rotary(q)
+            q = apply_rotary_emb(q, cos, sin)
+            k = apply_rotary_emb(k, cos, sin)
         y = F.scaled_dot_product_attention(q.transpose(1, 2), k.transpose(1, 2), v.transpose(1, 2), is_causal=True)
         y = y.transpose(1, 2).contiguous().view(B, T, C) # re-assemble all head outputs side by side
         # output projection
@@ -137,6 +140,7 @@ class Block(nn.Module):
     def __init__(self, mixing_layer, n_embd, n_layer):
         super().__init__()
         self.attn = deepcopy(mixing_layer) #CausalSelfPoM(n_embd, degree, expand, n_head)
+        self.mlp = MLP(n_embd)
         # Reinitialize with pytorch defaults
         for module in self.modules():
             if isinstance(module, nn.Linear):
@@ -153,7 +157,6 @@ class Block(nn.Module):
                     nn.init.uniform_(module.bias, -bound, bound)
             elif isinstance(module, nn.Embedding):
                 nn.init.normal_(module.weight, mean=0, std=1)
-        self.mlp = MLP(n_embd)
         # self.attn_scale = (1 / (2 * n_layer)**0.5)
         self.attn_scale = nn.Parameter(torch.ones((1, 1, n_embd))*(1 / (2 * n_layer)**0.5), requires_grad=True)
         self.mlp_scale = nn.Parameter(torch.ones((1, 1, n_embd)) * (1 / (2 * n_layer) ** 0.5), requires_grad=True)
@@ -167,7 +170,7 @@ class Block(nn.Module):
 class GPT(nn.Module):
     """GPT model with Polynomial Mixer attention."""
     
-    def __init__(self, mixing_layer, vocab_size: int = 50257, seq_length: int = 1024, n_layer: int = 12, n_head: int = 12, n_embd: int = 768):
+    def __init__(self, mixing_layer, vocab_size: int = 50257, seq_length: int = 1024, n_layer: int = 12, n_head: int = 12, n_embd: int = 768, use_rope: bool = True):
         super().__init__()
         self.vocab_size = vocab_size
         self.seq_length = seq_length
@@ -175,15 +178,21 @@ class GPT(nn.Module):
         self.n_head = n_head
         self.n_embd = n_embd
         self.head_dim = self.n_embd // self.n_head
+        self.use_rope = use_rope
 
-        self.transformer = nn.ModuleDict(dict(
-            wte=nn.Embedding(self.vocab_size, self.n_embd),
-            wpe=nn.Embedding(self.seq_length, self.n_embd),
-            h=nn.ModuleList([Block(mixing_layer, self.n_embd, self.n_layer) for _ in range(self.n_layer)]),
-        ))
+        if use_rope:
+            self.transformer = nn.ModuleDict(dict(
+                wte=nn.Embedding(self.vocab_size, self.n_embd),
+                h=nn.ModuleList([Block(mixing_layer, self.n_embd, self.n_layer) for _ in range(self.n_layer)]),
+            ))
+        else:
+            self.transformer = nn.ModuleDict(dict(
+                wte=nn.Embedding(self.vocab_size, self.n_embd),
+                wpe=nn.Embedding(self.seq_length, self.n_embd),
+                h=nn.ModuleList([Block(mixing_layer, self.n_embd, self.n_layer) for _ in range(self.n_layer)]),
+            ))
         self.lm_head = nn.Linear(self.n_embd, self.vocab_size, bias=False)
         self.transformer.wte.weight = self.lm_head.weight  # weight tying
-        # self.rotary = Rotary(self.head_dim)
 
     def forward(self, idx: torch.Tensor, targets: torch.Tensor = None, return_logits: bool = True):
         """
@@ -202,8 +211,9 @@ class GPT(nn.Module):
 
         # forward the GPT model itself
         x = self.transformer.wte(idx)  # token embeddings of shape (b, t, n_embd)
-        pos_emb = self.transformer.wpe(pos)  # position embeddings of shape (t, n_embd)
-        x = x + pos_emb
+        if not self.use_rope:
+            pos_emb = self.transformer.wpe(pos)  # position embeddings of shape (t, n_embd)
+            x = x + pos_emb
 
         for block in self.transformer.h:
             x = block(x)
@@ -268,23 +278,37 @@ class GPT(nn.Module):
         # )
         # optimizers.append(transformer_optimizer)
 
-        optimizer = AdamW([{
-            'params': self.lm_head.parameters(),
-            'lr': learning_rate,
-            'betas': betas,
-            'weight_decay': 0
-        },
-        {
-            'params': self.transformer.wpe.parameters(),
-            'lr': learning_rate,
-            'betas': betas,
-            'weight_decay': 0
-        },
-        {
-            'params': self.transformer.h.parameters(),
-            'lr': learning_rate,
-            'betas': betas,
-            'weight_decay': weight_decay
-        }])
+        if self.use_rope:
+            optimizer = AdamW([{
+                'params': self.lm_head.parameters(),
+                'lr': learning_rate,
+                'betas': betas,
+                'weight_decay': 0
+            },
+            {
+                'params': self.transformer.h.parameters(),
+                'lr': learning_rate,
+                'betas': betas,
+                'weight_decay': weight_decay
+            }])
+        else:
+            optimizer = AdamW([{
+                'params': self.lm_head.parameters(),
+                'lr': learning_rate,
+                'betas': betas,
+                'weight_decay': 0
+            },
+            {
+                'params': self.transformer.wpe.parameters(),
+                'lr': learning_rate,
+                'betas': betas,
+                'weight_decay': 0
+            },
+            {
+                'params': self.transformer.h.parameters(),
+                'lr': learning_rate,
+                'betas': betas,
+                'weight_decay': weight_decay
+            }])
         
         return optimizer

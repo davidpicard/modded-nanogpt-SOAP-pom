@@ -1,3 +1,4 @@
+import einops
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -194,6 +195,38 @@ def pom(xq: torch.Tensor, xc: torch.Tensor, coeff: torch.Tensor, k: int, n_sel_h
 # ComPoM Module Class
 # =============================================================================
 
+class Rotary(torch.nn.Module):
+    """Rotary position embeddings."""
+
+    def __init__(self, dim, base=10000):
+        super().__init__()
+        inv_freq = 1.0 / (base ** (torch.arange(0, dim, 2).float() / dim))
+        self.register_buffer("inv_freq", inv_freq)
+        self.seq_len_cached = None
+        self.cos_cached = None
+        self.sin_cached = None
+
+    def forward(self, x):
+        seq_len = x.shape[1]
+        if seq_len != self.seq_len_cached:
+            self.seq_len_cached = seq_len
+            t = torch.arange(seq_len, device=x.device).type_as(self.inv_freq)
+            freqs = torch.outer(t, self.inv_freq).to(x.device)
+            self.cos_cached = freqs.cos()
+            self.sin_cached = freqs.sin()
+        return self.cos_cached[None, :, None, :], self.sin_cached[None, :, None, :]
+
+
+def apply_rotary_emb(x, cos, sin):
+    """Apply rotary embeddings."""
+    assert x.ndim == 4  # multihead attention
+    d = x.shape[3] // 2
+    x1 = x[..., :d]
+    x2 = x[..., d:]
+    y1 = x1 * cos + x2 * sin
+    y2 = x1 * (-sin) + x2 * cos
+    return torch.cat([y1, y2], 3)
+
 class ComPoM(nn.Module):
     """
     More compact Polynomial Mixer (PoM) Module.
@@ -212,7 +245,7 @@ class ComPoM(nn.Module):
         pom (callable): The polynomial mixer operation function
     """
 
-    def __init__(self, dim: int, degree: int, expand: int, n_groups: int, n_sel_heads: int, bias: bool = False, layernorm=False):
+    def __init__(self, dim: int, degree: int, expand: int, n_groups: int, n_sel_heads: int, bias: bool = False, layernorm=False, use_rope: bool = True):
         """
         Initialize the PoM module.
 
@@ -236,7 +269,7 @@ class ComPoM(nn.Module):
             self.po_proj = nn.Conv1d(dim, expand * dim, kernel_size=1, bias=bias, groups=n_groups)
         else:
             self.po_proj = nn.Linear(dim, expand * dim, bias=bias)
-        self.po_coeff = nn.Parameter((torch.randn(dim * expand, degree)).clamp(-0.02, 0.02))
+        self.po_coeff = nn.Parameter((torch.randn(dim * expand, degree)).clamp(-0.01, 0.01))
         self.se_proj = nn.Linear(dim, n_sel_heads, bias=bias)
         self.ag_proj = nn.Linear(expand * dim, dim, bias=bias)
         self.pom = pom
@@ -244,6 +277,9 @@ class ComPoM(nn.Module):
         if layernorm:
             print(f"using layernorm!")
             self.ln = LayerNorm(expand*dim//n_sel_heads, elementwise_affine=False, bias=False)
+        self.use_rope = use_rope
+        if use_rope:
+            self.rotary = Rotary(n_sel_heads)
 
 
     def forward(self, xq: torch.Tensor, xc: Optional[torch.Tensor] = None,
@@ -270,6 +306,15 @@ class ComPoM(nn.Module):
         if self.layernorm:
             b, n, d = h.shape
             h = self.ln(h.view(b, n, self.n_sel_heads, -1)).view(b, n, d)
+        if self.use_rope:
+            b,n,d = s.shape
+            s = s.view(b, n, 1, d)
+            cos, sin = self.rotary(s)
+            s = apply_rotary_emb(s, cos, sin).view(b,n,d)
+            h = einops.rearrange(h, 'b n (h d) -> b n d h', h=self.n_sel_heads)
+            cos, sin = self.rotary(h)
+            h = apply_rotary_emb(h, cos, sin)
+            h = einops.rearrange(h, 'b n d h -> b n (h d)')
         sh = self.pom(s, h, self.po_coeff, self.order, self.n_sel_heads, mask)
 
         return self.ag_proj(sh)
