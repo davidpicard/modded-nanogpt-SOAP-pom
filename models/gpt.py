@@ -142,24 +142,31 @@ class Block(nn.Module):
         self.attn = deepcopy(mixing_layer) #CausalSelfPoM(n_embd, degree, expand, n_head)
         self.mlp = MLP(n_embd)
         # Reinitialize with pytorch defaults
-        for module in self.modules():
-            if isinstance(module, nn.Linear):
-                nn.init.kaiming_uniform_(module.weight, a=math.sqrt(5))
-                if module.bias is not None:
-                    fan_in, _ = nn.init._calculate_fan_in_and_fan_out(module.weight)
-                    bound = 1 / math.sqrt(fan_in) if fan_in > 0 else 0
-                    nn.init.uniform_(module.bias, -bound, bound)
-            elif isinstance(module, nn.Conv1d):
-                nn.init.kaiming_uniform_(module.weight, a=math.sqrt(5))
-                if module.bias is not None:
-                    fan_in, _ = nn.init._calculate_fan_in_and_fan_out(module.weight)
-                    bound = 1 / math.sqrt(fan_in) if fan_in > 0 else 0
-                    nn.init.uniform_(module.bias, -bound, bound)
-            elif isinstance(module, nn.Embedding):
-                nn.init.normal_(module.weight, mean=0, std=1)
+        # for module in self.modules():
+        #     if isinstance(module, nn.Linear):
+        #         nn.init.kaiming_uniform_(module.weight, a=math.sqrt(5))
+        #         if module.bias is not None:
+        #             fan_in, _ = nn.init._calculate_fan_in_and_fan_out(module.weight)
+        #             bound = 1 / math.sqrt(fan_in) if fan_in > 0 else 0
+        #             nn.init.uniform_(module.bias, -bound, bound)
+        #     elif isinstance(module, nn.Conv1d):
+        #         nn.init.kaiming_uniform_(module.weight, a=math.sqrt(5))
+        #         if module.bias is not None:
+        #             fan_in, _ = nn.init._calculate_fan_in_and_fan_out(module.weight)
+        #             bound = 1 / math.sqrt(fan_in) if fan_in > 0 else 0
+        #             nn.init.uniform_(module.bias, -bound, bound)
+        #     elif isinstance(module, nn.Embedding):
+        #         nn.init.normal_(module.weight, mean=0, std=1)
         # self.attn_scale = (1 / (2 * n_layer)**0.5)
         self.attn_scale = nn.Parameter(torch.ones((1, 1, n_embd))*(1 / (2 * n_layer)**0.5), requires_grad=True)
         self.mlp_scale = nn.Parameter(torch.ones((1, 1, n_embd)) * (1 / (2 * n_layer) ** 0.5), requires_grad=True)
+        def init_weights_(m):
+            if isinstance(m, nn.Linear) or isinstance(m, nn.Conv1d):
+                nn.init.xavier_uniform_(m.weight)
+                if m.bias is not None:
+                    nn.init.zeros_(m.bias)
+        self.apply(init_weights_)
+
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = x + self.attn_scale * self.attn(rmsnorm(x))
