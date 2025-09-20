@@ -146,7 +146,7 @@ def polynomial_aggregation_(x: torch.Tensor, coeff: torch.Tensor, k: int,
     return h
 
 
-def polynomial_selection_(x: torch.Tensor, h: torch.Tensor, n_sel_heads: int) -> torch.Tensor:
+def polynomial_selection_(s: torch.Tensor, h: torch.Tensor, n_sel_heads: int) -> torch.Tensor:
     """
     Apply polynomial selection with sigmoid gating.
 
@@ -157,7 +157,7 @@ def polynomial_selection_(x: torch.Tensor, h: torch.Tensor, n_sel_heads: int) ->
     Returns:
         Gated output tensor
     """
-    s = F.sigmoid(x).unsqueeze(-1)
+    s = s.unsqueeze(-1)
     orig_shape = h.shape
     new_shape = (*h.shape[:-1], n_sel_heads, h.shape[-1] // n_sel_heads)
     h = h.view(new_shape)
@@ -179,7 +179,7 @@ def pom(xq: torch.Tensor, xc: torch.Tensor, coeff: torch.Tensor, k: int, n_sel_h
     Args:
         xq: Query input tensor of shape (batch, query_len, dim)
         xc: Context input tensor of shape (batch, context_len, dim)
-        coeff: Polynomial coefficients of shape TODO
+        coeff: Polynomial coefficients of shape
         k: Polynomial order (degree of interactions to capture)
         mask: Optional attention mask for masking specific positions
 
@@ -270,7 +270,7 @@ class ComPoM(nn.Module):
         else:
             self.po_proj = nn.Linear(dim, expand * dim, bias=bias)
         self.po_coeff = nn.Parameter((torch.randn(dim * expand, degree)).clamp(-0.01, 0.01))
-        self.se_proj = nn.Linear(dim, n_sel_heads, bias=bias)
+        self.se_proj = nn.Linear(dim, n_sel_heads, bias=True)
         self.ag_proj = nn.Linear(expand * dim, dim, bias=bias)
         self.pom = pom
         self.layernorm = layernorm
@@ -298,7 +298,6 @@ class ComPoM(nn.Module):
         if xc is None:
             xc = xq  # self-attention
 
-        s = self.se_proj(xq)
         if self.n_groups > 1:
             h = self.po_proj(xc.transpose(1, 2)).transpose(1, 2)
         else:
@@ -306,11 +305,16 @@ class ComPoM(nn.Module):
         if self.layernorm:
             b, n, d = h.shape
             h = self.ln(h.view(b, n, self.n_sel_heads, -1)).view(b, n, d)
+
+        s = F.hardsigmoid(self.se_proj(xq), inplace=True)
+
         if self.use_rope:
+            # handle S
             b,n,d = s.shape
             s = s.view(b, n, 1, d)
             cos, sin = self.rotary(s)
             s = apply_rotary_emb(s, cos, sin).view(b,n,d)
+            # handle H
             h = einops.rearrange(h, 'b n (h d) -> b n d h', h=self.n_sel_heads)
             cos, sin = self.rotary(h)
             h = apply_rotary_emb(h, cos, sin)
