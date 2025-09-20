@@ -13,7 +13,7 @@ from torch.nn import LayerNorm
 # =============================================================================
 
 def pom_activation(x: torch.Tensor) -> torch.Tensor:
-    return F.leaky_relu(x, 0.01, True)
+    return torch.clamp(F.leaky_relu(x, 0.01, True), min=-0.1, max=6)
 
 
 def po2(x: torch.Tensor, coeff: torch.Tensor) -> torch.Tensor:
