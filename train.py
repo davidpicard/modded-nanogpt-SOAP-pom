@@ -53,7 +53,7 @@ def main(cfg: DictConfig):
         pl.callbacks.ModelCheckpoint(
             dirpath=os.path.join(cfg.logging.log_dir, str(uuid.uuid4())),
             filename='gpt-{step:06d}-{val_loss:.4f}',
-            save_top_k=3,
+            save_top_k=1,
             monitor='val_loss',
             mode='min',
             every_n_train_steps=cfg.evaluation.save_every
