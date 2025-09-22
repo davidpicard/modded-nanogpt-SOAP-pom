@@ -35,7 +35,7 @@ def main(cfg: DictConfig):
     # warmup model
     generator = torch.Generator(device="cuda")
     generator.manual_seed(3407)
-    prompt = torch.randint(0, model.model.vocab_size, size=(1, model.model.seq_length//2), generator=generator, device="cuda")
+    prompt = torch.randint(0, model.model.vocab_size, size=(cfg.training.batch_size, model.model.seq_length//2), generator=generator, device="cuda")
     logits, _ = model.model(prompt)
     logits.detach().cpu().numpy().mean()
 
