@@ -31,7 +31,7 @@ def main(cfg: DictConfig):
         model.model.compile()
     model.eval()
 
-    cb = TextGenerationCallback(max_new_tokens=1023, every_n_steps=1)
+    cb = TextGenerationCallback(max_new_tokens=model.model.seq_length-1, every_n_steps=1, num_unconditional=cfg.evaluation.num_unconditional_samples)
     # warmup model
     generator = torch.Generator(device="cuda")
     generator.manual_seed(3407)
