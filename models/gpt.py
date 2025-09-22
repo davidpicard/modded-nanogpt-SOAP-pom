@@ -193,11 +193,11 @@ class GPT(nn.Module):
                 if (i%6) == 5:
                     b = Block(CausalSelfAttention(n_embd=self.n_embd, degree=2, expand=2, n_head=self.n_embd//64, use_rope=True), self.n_embd, n_layer)
                     m.append(b)
-                    print(f"Layer {i}: {m[-1]}")
+                    # print(f"Layer {i}: {m[-1]}")
                 else:
                     b = Block(mixing_layer, self.n_embd, self.n_layer)
                     m.append(b)
-                    print(f"Layer {i}: {b}")
+                    # print(f"Layer {i}: {b}")
             self.transformer = nn.ModuleDict(dict(
                 wte=nn.Embedding(self.vocab_size, self.n_embd),
                 h=nn.ModuleList(m),
