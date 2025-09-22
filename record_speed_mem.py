@@ -31,11 +31,12 @@ def main(cfg: DictConfig):
         model.model.compile()
     model.eval()
 
-    cb = TextGenerationCallback(max_new_tokens=model.model.seq_length-1, every_n_steps=1, num_unconditional=cfg.evaluation.num_unconditional_samples)
+    cb = TextGenerationCallback(max_new_tokens=model.model.seq_length//2-1, every_n_steps=1, num_unconditional=cfg.evaluation.num_unconditional_samples)
     # warmup model
     generator = torch.Generator(device="cuda")
     generator.manual_seed(3407)
-    tokens = cb._sample_from_model(model, None, generator, "cuda")
+    prompt = torch.randint(0, model.model.vocab_size, size=(1, model.model.seq_length//2), generator=generator, device="cuda")
+    tokens = cb._sample_from_model(model, prompt, generator, "cuda")
     tokens = tokens[0].cpu().numpy()
 
     # first pass
@@ -46,9 +47,10 @@ def main(cfg: DictConfig):
     n_tokens = 0
 
     for i in tqdm(range(cb.num_unconditional)):
-        tokens = cb._sample_from_model(model, None, generator, "cuda")
+        prompt = torch.randint(0, model.model.vocab_size, size=(1, model.model.seq_length//2), generator=generator, device="cuda")
+        tokens = cb._sample_from_model(model, prompt, generator, "cuda")
         tokens = tokens[0].cpu().numpy()
-        n_tokens += len(tokens)
+        n_tokens += len(tokens) - len(prompt[0])
     end_loop_time = time.perf_counter()
     elapsed_loop_time = end_loop_time - start_loop_time
     print(f"1st pass: {n_tokens} in {elapsed_loop_time}s, speed: {n_tokens/elapsed_loop_time} max mem: {torch.cuda.max_memory_allocated()}")
@@ -61,9 +63,10 @@ def main(cfg: DictConfig):
     generator.manual_seed(3407)
     n_tokens = 0
     for i in tqdm(range(cb.num_unconditional)):
-        tokens = cb._sample_from_model(model, None, generator, "cuda")
+        prompt = torch.randint(0, model.model.vocab_size, size=(1, model.model.seq_length//2), generator=generator, device="cuda")
+        tokens = cb._sample_from_model(model, prompt, generator, "cuda")
         tokens = tokens[0].cpu().numpy()
-        n_tokens += len(tokens)
+        n_tokens += len(tokens) - len(prompt[0])
     end_loop_time = time.perf_counter()
     elapsed_loop_time = end_loop_time - start_loop_time
     print(f"2nd pass: {n_tokens} in {elapsed_loop_time}s, speed: {n_tokens/elapsed_loop_time}  max mem: {torch.cuda.max_memory_allocated()}")
