@@ -227,6 +227,14 @@ def apply_rotary_emb(x, cos, sin):
     y2 = x1 * (-sin) + x2 * cos
     return torch.cat([y1, y2], 3)
 
+
+def rmsnorm(x0, eps=1e-3):
+    """RMS normalization function (matching reference implementation)."""
+    x = x0.float()
+    x = x * torch.rsqrt(x.pow(2).mean(-1, keepdim=True) + eps)
+    return x.type_as(x0)
+
+
 class ComPoM(nn.Module):
     """
     More compact Polynomial Mixer (PoM) Module.
@@ -276,7 +284,6 @@ class ComPoM(nn.Module):
         self.layernorm = layernorm
         if layernorm:
             print(f"using layernorm!")
-            self.ln = LayerNorm(expand*dim//n_sel_heads, elementwise_affine=False, bias=False)
         self.use_rope = use_rope
         if use_rope:
             self.rotary = Rotary(n_sel_heads)
@@ -304,7 +311,7 @@ class ComPoM(nn.Module):
             h = self.po_proj(xc)
         if self.layernorm:
             b, n, d = h.shape
-            h = self.ln(h.view(b, n, self.n_sel_heads, -1)).view(b, n, d)
+            h = rmsnorm(h.view(b, n, self.n_sel_heads, -1)).view(b, n, d)
 
         s = F.hardsigmoid(self.se_proj(xq), inplace=True)
 
