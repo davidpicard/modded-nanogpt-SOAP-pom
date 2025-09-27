@@ -177,7 +177,7 @@ class Block(nn.Module):
 class GPT(nn.Module):
     """GPT model with Polynomial Mixer attention."""
     
-    def __init__(self, mixing_layer, vocab_size: int = 50257, seq_length: int = 1024, n_layer: int = 12, n_head: int = 12, n_embd: int = 768, use_rope: bool = True):
+    def __init__(self, mixing_layer, vocab_size: int = 50257, seq_length: int = 1024, n_layer: int = 12, n_head: int = 12, n_embd: int = 768, use_rope: bool = True, hybrid: int = 0):
         super().__init__()
         self.vocab_size = vocab_size
         self.seq_length = seq_length
@@ -186,18 +186,19 @@ class GPT(nn.Module):
         self.n_embd = n_embd
         self.head_dim = self.n_embd // self.n_head
         self.use_rope = use_rope
+        self.hybrid = hybrid
 
         if use_rope:
             m = []
             for i in range(self.n_layer):
-                if (i%6) == 5:
+                if (self.hybrid>0) and (i%self.hybrid) == self.hybrid-1:
                     b = Block(CausalSelfAttention(n_embd=self.n_embd, degree=2, expand=2, n_head=self.n_embd//64, use_rope=True), self.n_embd, n_layer)
                     m.append(b)
-                    # print(f"Layer {i}: {m[-1]}")
+                    print(f"Layer {i}: {m[-1]}")
                 else:
                     b = Block(mixing_layer, self.n_embd, self.n_layer)
                     m.append(b)
-                    # print(f"Layer {i}: {b}")
+                    print(f"Layer {i}: {b}")
             self.transformer = nn.ModuleDict(dict(
                 wte=nn.Embedding(self.vocab_size, self.n_embd),
                 h=nn.ModuleList(m),

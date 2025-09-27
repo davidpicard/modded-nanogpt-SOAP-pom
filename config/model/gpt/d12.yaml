@@ -1,10 +1,6 @@
 # @package _global_
 
 model:
-  n_layer: 12
-  n_head: 1
-  n_embd: 768
-
   gpt:
     _target_: models.gpt.GPT
     mixing_layer: ${model.mixing_layer}
@@ -13,4 +9,5 @@ model:
     n_layer: ${model.n_layer}
     n_head: ${model.n_head}
     n_embd: ${model.n_embd}
+    hybrid: ${model.hybrid}
 
