@@ -157,7 +157,8 @@ def polynomial_selection_(s: torch.Tensor, h: torch.Tensor, n_sel_heads: int) ->
     Returns:
         Gated output tensor
     """
-    s = s.unsqueeze(-1)
+    if s.ndim < 4:
+        s = s.unsqueeze(-1)
     orig_shape = h.shape
     new_shape = (*h.shape[:-1], n_sel_heads, h.shape[-1] // n_sel_heads)
     h = h.view(new_shape)
@@ -271,6 +272,7 @@ class ComPoM(nn.Module):
         self.n_sel_heads = n_sel_heads
         assert dim % n_groups == 0, "dim must be divisible by n_groups for group conv"
         assert dim * expand % n_sel_heads == 0, "dim * expand must be divisible by n_sel_heads"
+        self.head_dim = dim * expand // n_sel_heads
 
         # Linear projections
         if self.n_groups > 1:
@@ -286,7 +288,7 @@ class ComPoM(nn.Module):
             print(f"using layernorm!")
         self.use_rope = use_rope
         if use_rope:
-            self.rotary = Rotary(n_sel_heads)
+            self.rotary = Rotary(self.head_dim)
 
 
     def forward(self, xq: torch.Tensor, xc: Optional[torch.Tensor] = None,
@@ -317,15 +319,15 @@ class ComPoM(nn.Module):
 
         if self.use_rope:
             # handle S
-            b,n,d = s.shape
-            s = s.view(b, n, 1, d)
+            b,n,l = s.shape
+            s = s.view(b, n, l, 1).expand((-1,-1,-1,self.head_dim))
             cos, sin = self.rotary(s)
-            s = apply_rotary_emb(s, cos, sin).view(b,n,d)
+            s = apply_rotary_emb(s, cos, sin)
             # handle H
-            h = einops.rearrange(h, 'b n (h d) -> b n d h', h=self.n_sel_heads)
+            h = einops.rearrange(h, 'b n (l d) -> b n l d', l=self.n_sel_heads)
             cos, sin = self.rotary(h)
             h = apply_rotary_emb(h, cos, sin)
-            h = einops.rearrange(h, 'b n d h -> b n (h d)')
+            h = einops.rearrange(h, 'b n l d -> b n (l d)')
         sh = self.pom(s, h, self.po_coeff, self.order, self.n_sel_heads, mask)
 
         return self.ag_proj(sh)
