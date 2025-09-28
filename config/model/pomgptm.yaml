@@ -1,0 +1,14 @@
+defaults:
+ - mixing_layer: compom
+ - _self_
+ - gpt: d24
+
+vocab_size: 50257
+seq_length: ${training.sequence_length}
+n_layer: 24
+n_head: 32
+n_groups: 1
+degree: 2
+expand: 2
+n_embd: 1024
+hybrid: 0
