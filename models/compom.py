@@ -272,7 +272,7 @@ class ComPoM(nn.Module):
         self.n_sel_heads = n_sel_heads
         assert dim % n_groups == 0, "dim must be divisible by n_groups for group conv"
         assert dim * expand % n_sel_heads == 0, "dim * expand must be divisible by n_sel_heads"
-        self.head_dim = dim * expand // n_sel_heads
+        self.head_dim = dim * expand // n_sel_heads if n_sel_heads>1 else dim*expand
 
         # Linear projections
         if self.n_groups > 1:
@@ -280,7 +280,10 @@ class ComPoM(nn.Module):
         else:
             self.po_proj = nn.Linear(dim, expand * dim, bias=bias)
         self.po_coeff = nn.Parameter((torch.randn(dim * expand, degree)).clamp(-0.01, 0.01))
-        self.se_proj = nn.Linear(dim, n_sel_heads, bias=True)
+        if n_sel_heads>1:
+            self.se_proj = nn.Linear(dim, n_sel_heads, bias=True)
+        else:
+            self.se_proj = nn.Linear(dim, expand*dim, bias=True)
         self.ag_proj = nn.Linear(expand * dim, dim, bias=bias)
         self.pom = pom
         self.layernorm = layernorm
@@ -320,7 +323,10 @@ class ComPoM(nn.Module):
         if self.use_rope:
             # handle S
             b,n,l = s.shape
-            s = s.view(b, n, l, 1).expand((-1,-1,-1,self.head_dim))
+            if self.n_sel_heads>1:
+                s = s.view(b, n, l, 1).expand((-1,-1,-1,self.head_dim))
+            else:
+                s = s.view(b, n, 1, l)
             cos, sin = self.rotary(s)
             s = apply_rotary_emb(s, cos, sin)
             # handle H
