@@ -115,7 +115,7 @@ class CausalSelfAttention(nn.Module):
             q = apply_rotary_emb(q, cos, sin)
             k = apply_rotary_emb(k, cos, sin)
         if self.context_window > 0:
-            window_mask = torch.logical_xor(torch.ones(T, T, dtype=torch.bool).tril(diagonal=0), torch.ones(T, T, dtype=torch.bool).tril(diagonal=-self.context_window))
+            window_mask = torch.logical_xor(torch.ones(T, T, dtype=torch.bool).tril(diagonal=0), torch.ones(T, T, dtype=torch.bool).tril(diagonal=-self.context_window)).to(q.device)
             # print("***** using windowed mask!!!")
             y = F.scaled_dot_product_attention(q.transpose(1, 2), k.transpose(1, 2), v.transpose(1, 2), is_causal=False, attn_mask=window_mask)
         else:
