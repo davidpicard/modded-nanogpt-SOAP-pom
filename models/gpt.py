@@ -85,7 +85,7 @@ class CausalSelfComPoM(nn.Module):
 
 class CausalSelfAttention(nn.Module):
 
-    def __init__(self, n_embd, degree, expand, n_head, use_rope: bool = True):
+    def __init__(self, n_embd, degree, expand, n_head, use_rope: bool = True, context_window=-1):
         super().__init__()
         self.degree = degree
         self.expand = expand
@@ -100,6 +100,7 @@ class CausalSelfAttention(nn.Module):
         self.use_rope = use_rope
         if use_rope:
             self.rotary = Rotary(self.head_dim)
+        self.context_window = context_window
 
     def forward(self, x):
         B, T, C = x.size() # batch size, sequence length, embedding dimensionality (n_embd)
@@ -113,7 +114,14 @@ class CausalSelfAttention(nn.Module):
             cos, sin = self.rotary(q)
             q = apply_rotary_emb(q, cos, sin)
             k = apply_rotary_emb(k, cos, sin)
-        y = F.scaled_dot_product_attention(q.transpose(1, 2), k.transpose(1, 2), v.transpose(1, 2), is_causal=True)
+        if self.context_window > 0:
+            attn_bias = torch.zeros(T, T, dtype=torch.float, device=q.device)
+            temp_mask = torch.logical_xor(torch.ones(T, T, dtype=torch.bool).tril(diagonal=0), torch.ones(T, T, dtype=torch.bool).tril(diagonal=-self.context_window))
+            attn_bias.masked_fill_(temp_mask.to(q.device).logical_not(), float("-inf"))
+            # print("***** using windowed mask!!!")
+            y = F.scaled_dot_product_attention(q.transpose(1, 2), k.transpose(1, 2), v.transpose(1, 2), is_causal=False, attn_mask=attn_bias)
+        else:
+            y = F.scaled_dot_product_attention(q.transpose(1, 2), k.transpose(1, 2), v.transpose(1, 2), is_causal=True)
         y = y.transpose(1, 2).contiguous().view(B, T, C) # re-assemble all head outputs side by side
         # output projection
         y = self.c_proj(y)
@@ -177,7 +185,8 @@ class Block(nn.Module):
 class GPT(nn.Module):
     """GPT model with Polynomial Mixer attention."""
     
-    def __init__(self, mixing_layer, vocab_size: int = 50257, seq_length: int = 1024, n_layer: int = 12, n_head: int = 12, n_embd: int = 768, use_rope: bool = True, hybrid: int = 0):
+    def __init__(self, mixing_layer, vocab_size: int = 50257, seq_length: int = 1024, n_layer: int = 12, n_head: int = 12, n_embd: int = 768, use_rope: bool = True, hybrid: int = 0,
+                 context_window: int = -1):
         super().__init__()
         self.vocab_size = vocab_size
         self.seq_length = seq_length
@@ -192,7 +201,7 @@ class GPT(nn.Module):
             m = []
             for i in range(self.n_layer):
                 if (self.hybrid>0) and (i%self.hybrid) == self.hybrid-1:
-                    b = Block(CausalSelfAttention(n_embd=self.n_embd, degree=2, expand=2, n_head=self.n_embd//64, use_rope=True), self.n_embd, n_layer)
+                    b = Block(CausalSelfAttention(n_embd=self.n_embd, degree=2, expand=2, n_head=self.n_embd//64, use_rope=True, context_window=context_window), self.n_embd, n_layer)
                     m.append(b)
                     print(f"Layer {i}: {m[-1]}")
                 else:
