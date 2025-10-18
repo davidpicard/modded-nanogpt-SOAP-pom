@@ -1,15 +1,15 @@
 defaults:
  - mixing_layer: compom
  - _self_
- - gpt: d24
+ - gpt: d36
 
 vocab_size: 50257
 seq_length: ${training.sequence_length}
-n_layer: 24
-n_head: 32
+n_layer: 36
+n_head: 40
 n_groups: 1
 degree: 2
 expand: 2
-n_embd: 1024
+n_embd: 1280
 hybrid: 4
 context_window: 128
