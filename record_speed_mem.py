@@ -35,7 +35,7 @@ def main(cfg: DictConfig):
     # warmup model
     generator = torch.Generator(device="cuda")
     generator.manual_seed(3407)
-    prompt = torch.randint(0, model.model.vocab_size, size=(cfg.training.batch_size, model.model.seq_length//2), generator=generator, device="cuda")
+    prompt = torch.randint(0, model.model.vocab_size, size=(cfg.training.batch_size, model.model.seq_length-1), generator=generator, device="cuda")
     logits, _ = model.model(prompt)
     logits.detach().cpu().numpy().mean()
 
@@ -47,12 +47,12 @@ def main(cfg: DictConfig):
     n_tokens = 0
 
     for i in tqdm(range(cb.num_unconditional)):
-        prompt = torch.randint(0, model.model.vocab_size, size=(cfg.training.batch_size, model.model.seq_length//2), generator=generator, device="cuda")
+        prompt = torch.randint(0, model.model.vocab_size, size=(cfg.training.batch_size, model.model.seq_length-1), generator=generator, device="cuda")
         logits, _ = model.model(prompt)
         logits.detach().cpu().numpy().mean()
         # tokens = cb._sample_from_model(model, prompt, generator, "cuda")
         # tokens = tokens[0].cpu().numpy()
-        n_tokens += np.prod(prompt.shape)
+        n_tokens += cfg.training.batch_size
     end_loop_time = time.perf_counter()
     elapsed_loop_time = end_loop_time - start_loop_time
     print(f"1st pass: {n_tokens} in {elapsed_loop_time}s, speed: {n_tokens/elapsed_loop_time} max mem: {torch.cuda.max_memory_allocated()}")
@@ -65,12 +65,12 @@ def main(cfg: DictConfig):
     generator.manual_seed(3407)
     n_tokens = 0
     for i in tqdm(range(cb.num_unconditional)):
-        prompt = torch.randint(0, model.model.vocab_size, size=(cfg.training.batch_size, model.model.seq_length//2), generator=generator, device="cuda")
+        prompt = torch.randint(0, model.model.vocab_size, size=(cfg.training.batch_size, model.model.seq_length-1), generator=generator, device="cuda")
         logits, _ = model.model(prompt)
         logits.detach().cpu().numpy().mean()
         # tokens = cb._sample_from_model(model, prompt, generator, "cuda")
         # tokens = tokens[0].cpu().numpy()
-        n_tokens += np.prod(prompt.shape)
+        n_tokens += cfg.training.batch_size
     end_loop_time = time.perf_counter()
     elapsed_loop_time = end_loop_time - start_loop_time
     print(f"2nd pass: {n_tokens} in {elapsed_loop_time}s, speed: {n_tokens/elapsed_loop_time}  max mem: {torch.cuda.max_memory_allocated()}")
