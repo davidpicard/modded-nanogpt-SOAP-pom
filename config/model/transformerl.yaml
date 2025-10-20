@@ -1,0 +1,12 @@
+defaults:
+ - mixing_layer: self-attention
+ - _self_
+ - gpt: d36
+
+vocab_size: 50257
+seq_length: ${training.sequence_length}
+n_layer: 36
+n_head: 20
+degree: 2
+expand: 2
+n_embd: 1280
