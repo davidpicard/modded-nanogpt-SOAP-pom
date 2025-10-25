@@ -141,10 +141,12 @@ class CausalSelfAttention(nn.Module):
         k = k.view(B, T, self.n_head, self.head_dim)
         q = q.view(B, T, self.n_head, self.head_dim)
         v = v.view(B, T, self.n_head, self.head_dim)
-        state['kv_cache'].to(x.device)
-        k, v = state['kv_cache'].update(k.transpose(1, 2).float(), v.transpose(1, 2).float())
-        k = k.transpose(1, 2)[:, 0:state['kv_cache'].size, :, :].to(x.dtype)
-        v = v.transpose(1, 2)[:, 0:state['kv_cache'].size, :, :].to(x.dtype)
+        if 'kv_cache' not in state:
+            state['kv_cache'] = KVCache(state['bs'], state['max_len'], self.n_head, self.head_dim, dtype=k.dtype)
+            state['kv_cache'].to(x.device)
+        k, v = state['kv_cache'].update(k.transpose(1, 2), v.transpose(1, 2))
+        k = k.transpose(1, 2)[:, 0:state['kv_cache'].size, :, :]
+        v = v.transpose(1, 2)[:, 0:state['kv_cache'].size, :, :]
         full_n = state['n']+T
         current_pos = state['n'] + torch.arange(0, T, dtype=torch.long, device=x.device)
 
@@ -168,7 +170,6 @@ class CausalSelfAttention(nn.Module):
 
     def reset(self, state):
         state['n'] = 0
-        state['kv_cache'] = KVCache(state['bs'], state['max_len'], self.n_head, self.head_dim, dtype=torch.float32)
         return state
 
 
