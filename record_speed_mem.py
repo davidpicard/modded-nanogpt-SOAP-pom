@@ -31,7 +31,7 @@ def main(cfg: DictConfig):
         model.model.compile()
     model.eval()
 
-    with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
+    with torch.autocast(device_type="cuda", dtype=torch.float32):
         cb = TextGenerationCallback(max_new_tokens=model.model.seq_length//2-1, every_n_steps=1, num_unconditional=cfg.evaluation.num_unconditional_samples)
         # warmup model
         generator = torch.Generator(device="cuda")
