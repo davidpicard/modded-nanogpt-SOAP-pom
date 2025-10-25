@@ -373,6 +373,7 @@ class ComPoM(nn.Module):
         sh = polynomial_selection_(s, h, self.n_sel_heads)
         return self.ag_proj(sh), new_state
 
+    @torch.no_grad
     def ar_forward(self, xq, state):
         # print(f"xq: {xq.shape}")
         B, T, D = xq.size()

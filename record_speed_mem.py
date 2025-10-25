@@ -42,11 +42,11 @@ def main(cfg: DictConfig):
 
         # first pass
         print(f"First pass")
-        start_loop_time = time.perf_counter()
         generator = torch.Generator(device="cuda")
         generator.manual_seed(3407)
         n_tokens = 0
 
+        start_loop_time = time.perf_counter()
         for i in tqdm(range(cb.num_unconditional)):
             idx = torch.randint(0, model.model.vocab_size, size=(1,1), generator=generator, device="cuda")
             state = model.model.reset(batch_size=1)
@@ -63,10 +63,10 @@ def main(cfg: DictConfig):
 
         # second pass
         print(f"Second pass")
-        start_loop_time = time.perf_counter()
         generator = torch.Generator(device="cuda")
         generator.manual_seed(3407)
         n_tokens = 0
+        start_loop_time = time.perf_counter()
         for i in tqdm(range(cb.num_unconditional)):
             idx = torch.randint(0, model.model.vocab_size, size=(1,1), generator=generator, device="cuda")
             state = model.model.reset(batch_size=1)
