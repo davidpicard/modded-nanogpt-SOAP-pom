@@ -124,7 +124,7 @@ class CausalSelfAttention(nn.Module):
             k = apply_rotary_emb(k, cos, sin)
         if self.context_window > 0:
             window_mask = torch.logical_xor(torch.ones(T, T, dtype=torch.bool).tril(diagonal=0), torch.ones(T, T, dtype=torch.bool).tril(diagonal=-self.context_window)).to(q.device)
-            # print("***** using windowed mask!!!")
+            print("***** using windowed mask!!!")
             y = F.scaled_dot_product_attention(q.transpose(1, 2), k.transpose(1, 2), v.transpose(1, 2), is_causal=False, attn_mask=window_mask)
         else:
             y = F.scaled_dot_product_attention(q.transpose(1, 2), k.transpose(1, 2), v.transpose(1, 2), is_causal=True)
@@ -133,7 +133,26 @@ class CausalSelfAttention(nn.Module):
         y = self.c_proj(y)
         return y
 
+    @torch.no_grad
     def ar_forward(self, x, state):
+        B, T, D = x.shape
+        if 'x_pred' in state:
+            N = state['n']
+            state['x_pred'][:, N:N+T, :] = x
+            state['n'] = N+T
+            x = state['x_pred'][:, 0:N+T, :]
+        else:
+            # print(f" MHA allocating x cache")
+            state['x_pred'] = torch.zeros((B, state['max_len'], self.n_embd), dtype=x.dtype).to(x.device)
+            state['x_pred'][:, 0:T, :] = x
+            state['n'] = T
+        _, N, _ = x.shape
+        # print(f" MHA x: {x.shape} N: {N} T: {T}")
+        out = self.forward(x)[:, N-T:N, :]
+        # print(f" MHA out: {out.shape} N: {N} T: {T}")
+        return out, state
+
+    def ar_forward2(self, x, state):
         B, T, C = x.size() # batch size, sequence length, embedding dimensionality (n_embd)
         # calculate query, key, values for all heads in batch and move head forward to be the batch dim
         qkv = self.c_attn(x)
@@ -142,7 +161,7 @@ class CausalSelfAttention(nn.Module):
         q = q.view(B, T, self.n_head, self.head_dim)
         v = v.view(B, T, self.n_head, self.head_dim)
         if 'kv_cache' not in state:
-            state['kv_cache'] = KVCache(state['bs'], state['max_len'], self.n_head, self.head_dim, dtype=k.dtype)
+            state['kv_cache'] = KVCache(B, state['max_len'], self.n_head, self.head_dim, dtype=k.dtype)
             state['kv_cache'].to(x.device)
         k, v = state['kv_cache'].update(k.transpose(1, 2), v.transpose(1, 2))
         k = k.transpose(1, 2)[:, 0:state['kv_cache'].size, :, :]
@@ -170,6 +189,7 @@ class CausalSelfAttention(nn.Module):
 
     def reset(self, state):
         state['n'] = 0
+        self.rotary.forward(torch.arange(0, state['max_len'], dtype=torch.long).unsqueeze(0).to(self.rotary.inv_freq.device))
         return state
 
 
@@ -227,6 +247,7 @@ class Block(nn.Module):
         x = x + self.mlp_scale * self.mlp(rmsnorm(x))
         return x
 
+    @torch.no_grad
     def ar_forward(self, x: torch.Tensor, state):
         dx, state = self.attn.ar_forward(rmsnorm(x), state)
         x = x + self.attn_scale * dx
@@ -319,6 +340,7 @@ class GPT(nn.Module):
 
         return logits, loss
 
+    @torch.no_grad
     def ar_forward(self, idx, state):
         b, t = idx.size()
         x = self.transformer.wte(idx)

@@ -15,14 +15,14 @@ class Rotary(torch.nn.Module):
 
     def forward(self, x):
         seq_len = x.shape[1]
-        if seq_len != self.seq_len_cached:
+        t = torch.arange(seq_len, device=x.device)
+        if (not self.seq_len_cached) or seq_len >= self.seq_len_cached:
             # print(f"rotary.forward caching rotary: {seq_len} != {self.seq_len_cached}")
             self.seq_len_cached = seq_len
-            t = torch.arange(seq_len, device=x.device).type_as(self.inv_freq)
-            freqs = torch.outer(t, self.inv_freq).to(x.device)
+            freqs = torch.outer(t.type_as(self.inv_freq), self.inv_freq).to(x.device)
             self.cos_cached = freqs.cos()
             self.sin_cached = freqs.sin()
-        return self.cos_cached[None, :, None, :], self.sin_cached[None, :, None, :]
+        return self.cos_cached[None, t, None, :], self.sin_cached[None, t, None, :]
 
     def position_forward(self, pos, seq_len, device="cpu"):
         if seq_len != self.seq_len_cached:
