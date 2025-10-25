@@ -81,7 +81,7 @@ def mask_mixer(h: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
     Returns:
         Masked and aggregated tensor of shape (batch, 1, dim)
     """
-    return (h * mask.unsqueeze(-1)).sum(dim=1, keepdims=True) / (1.e-7 + mask.unsqueeze(-1).sum(dim=1, keepdims=True))
+    return (h * mask.unsqueeze(-1)).sum(dim=1, keepdims=True) / (mask.unsqueeze(-1).sum(dim=1, keepdims=True))
 
 
 def full_mask_mixer(h: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
@@ -97,7 +97,7 @@ def full_mask_mixer(h: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
     """
     mask = mask.type(h.dtype)
     h = torch.einsum('bnd, bmn -> bmd', h, mask)  # b batch, n context tokens, m query tokens, d dim
-    h = h / (1.e-7 + mask.sum(dim=2, keepdims=True))
+    h = h / (mask.sum(dim=2, keepdims=True))
     return h
 
 
@@ -280,7 +280,7 @@ class ComPoM(nn.Module):
             self.po_proj = nn.Conv1d(dim, expand * dim, kernel_size=1, bias=bias, groups=n_groups)
         else:
             self.po_proj = nn.Linear(dim, expand * dim, bias=bias)
-        self.po_coeff = nn.Parameter((torch.randn(dim * expand, degree)).clamp(-0.01, 0.01))
+        self.po_coeff = nn.Parameter((torch.randn(dim * expand, degree)).clamp(-0.001, 0.001))
         if n_sel_heads>1:
             self.se_proj = nn.Linear(dim, n_sel_heads, bias=True)
         else:
@@ -378,11 +378,10 @@ class ComPoM(nn.Module):
         # print(f"xq: {xq.shape}")
         B, T, D = xq.size()
         n_current = T
-        xc = xq
         if self.n_groups > 1:
-            h = self.po_proj(xc.transpose(1, 2)).transpose(1, 2)
+            h = self.po_proj(xq.transpose(1, 2)).transpose(1, 2)
         else:
-            h = self.po_proj(xc)
+            h = self.po_proj(xq)
         if self.layernorm:
             b, n, d = h.shape
             h = rmsnorm(h.view(b, n, self.n_sel_heads, -1)).view(b, n, d)
@@ -409,7 +408,7 @@ class ComPoM(nn.Module):
             h = einops.rearrange(h, 'b n l d -> b n (l d)')
 
         h = polynomial_aggregation_(h, self.po_coeff, self.order)
-        h = n_past/(n_past + n_current) * h_past + n_current/(n_past + n_current) * h
+        h = (n_past*h_past + n_current*h)/(n_past + n_current)
 
         new_state = {'max_len': state['max_len'], 'h': h, 'n': n_past+n_current}
 
@@ -417,7 +416,7 @@ class ComPoM(nn.Module):
         return self.ag_proj(sh), new_state
 
     def reset(self, state):
-        state['h'] = 0
+        state['h'] = 0.
         state['n'] = 0
         return state
 

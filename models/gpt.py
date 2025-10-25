@@ -124,7 +124,7 @@ class CausalSelfAttention(nn.Module):
             k = apply_rotary_emb(k, cos, sin)
         if self.context_window > 0:
             window_mask = torch.logical_xor(torch.ones(T, T, dtype=torch.bool).tril(diagonal=0), torch.ones(T, T, dtype=torch.bool).tril(diagonal=-self.context_window)).to(q.device)
-            print("***** using windowed mask!!!")
+            # print("***** using windowed mask!!!")
             y = F.scaled_dot_product_attention(q.transpose(1, 2), k.transpose(1, 2), v.transpose(1, 2), is_causal=False, attn_mask=window_mask)
         else:
             y = F.scaled_dot_product_attention(q.transpose(1, 2), k.transpose(1, 2), v.transpose(1, 2), is_causal=True)
@@ -147,10 +147,28 @@ class CausalSelfAttention(nn.Module):
             state['x_pred'][:, 0:T, :] = x
             state['n'] = T
         _, N, _ = x.shape
-        # print(f" MHA x: {x.shape} N: {N} T: {T}")
-        out = self.forward(x)[:, N-T:N, :]
-        # print(f" MHA out: {out.shape} N: {N} T: {T}")
-        return out, state
+        # calculate query, key, values for all heads in batch and move head forward to be the batch dim
+        qkv = self.c_attn(x)
+        q, k, v = qkv.split(self.n_embd, dim=2)
+        k = k.view(B, N, self.n_head, self.head_dim)
+        q = q.view(B, N, self.n_head, self.head_dim)
+        v = v.view(B, N, self.n_head, self.head_dim)
+        if self.use_rope:
+            cos, sin = self.rotary(q)
+            q = apply_rotary_emb(q, cos, sin)
+            k = apply_rotary_emb(k, cos, sin)
+        if self.context_window > 0 and N > self.context_window:
+            q = q[:, N-self.context_window:N, :]
+            k = k[:, N-self.context_window:N, :]
+            v = v[:, N-self.context_window:N, :]
+            N = self.context_window
+        y = F.scaled_dot_product_attention(q.transpose(1, 2), k.transpose(1, 2), v.transpose(1, 2), is_causal=True)
+        # print(f" MHA y: {y.shape} T: {T} N: {N}")
+        y = y[:,:,N-T:N,:]
+        y = y.transpose(1, 2).contiguous().view(B, T, D) # re-assemble all head outputs side by side
+        # output projection
+        y = self.c_proj(y)
+        return y, state
 
     def ar_forward2(self, x, state):
         B, T, C = x.size() # batch size, sequence length, embedding dimensionality (n_embd)
