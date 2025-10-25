@@ -349,13 +349,14 @@ class GPT(nn.Module):
             pos_emb = self.transformer.wpe(pos).view(1, t, self.n_embd)
             x = x + pos_emb
 
+        new_state = []
         for l in range(len(self.transformer.h)):
             x, s = self.transformer.h[l].ar_forward(x, state[l])
-            state[l] = s
+            new_state.append(s)
         x = rmsnorm(x)
         logits = self.lm_head(x[:, [-1], :])  # note: using list [-1] to preserve the time dim
         logits = logits.float()  # use tf32/fp32 for logits
-        return logits, state
+        return logits, new_state
 
     def reset(self, batch_size):
         state = []

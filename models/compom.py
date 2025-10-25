@@ -411,11 +411,10 @@ class ComPoM(nn.Module):
         h = polynomial_aggregation_(h, self.po_coeff, self.order)
         h = n_past/(n_past + n_current) * h_past + n_current/(n_past + n_current) * h
 
-        state['h'] = h
-        state['n'] = n_past + n_current
+        new_state = {'max_len': state['max_len'], 'h': h, 'n': n_past+n_current}
 
         sh = polynomial_selection_(s, h, self.n_sel_heads)
-        return self.ag_proj(sh), state
+        return self.ag_proj(sh), new_state
 
     def reset(self, state):
         state['h'] = 0
