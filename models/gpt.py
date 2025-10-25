@@ -1,11 +1,13 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torchtune.modules import KVCache
 
 import math
 from copy import deepcopy
 
 from models import compom
+from models.rotary import Rotary, apply_rotary_emb
 
 
 def rmsnorm(x0, eps=1e-3):
@@ -27,38 +29,38 @@ class RMSNorm(nn.Module):
         x = x * torch.rsqrt(x.pow(2).mean(-1, keepdim=True) + self.eps)
         return x.type_as(x0)
 
-
-class Rotary(torch.nn.Module):
-    """Rotary position embeddings."""
-    
-    def __init__(self, dim, base=10000):
-        super().__init__()
-        inv_freq = 1.0 / (base ** (torch.arange(0, dim, 2).float() / dim))
-        self.register_buffer("inv_freq", inv_freq)
-        self.seq_len_cached = None
-        self.cos_cached = None
-        self.sin_cached = None
-
-    def forward(self, x):
-        seq_len = x.shape[1]
-        if seq_len != self.seq_len_cached:
-            self.seq_len_cached = seq_len
-            t = torch.arange(seq_len, device=x.device).type_as(self.inv_freq)
-            freqs = torch.outer(t, self.inv_freq).to(x.device)
-            self.cos_cached = freqs.cos()
-            self.sin_cached = freqs.sin()
-        return self.cos_cached[None, :, None, :], self.sin_cached[None, :, None, :]
-
-
-def apply_rotary_emb(x, cos, sin):
-    """Apply rotary embeddings."""
-    assert x.ndim == 4  # multihead attention
-    d = x.shape[3]//2
-    x1 = x[..., :d]
-    x2 = x[..., d:]
-    y1 = x1 * cos + x2 * sin
-    y2 = x1 * (-sin) + x2 * cos
-    return torch.cat([y1, y2], 3)
+#
+# class Rotary(torch.nn.Module):
+#     """Rotary position embeddings."""
+#
+#     def __init__(self, dim, base=10000):
+#         super().__init__()
+#         inv_freq = 1.0 / (base ** (torch.arange(0, dim, 2).float() / dim))
+#         self.register_buffer("inv_freq", inv_freq)
+#         self.seq_len_cached = None
+#         self.cos_cached = None
+#         self.sin_cached = None
+#
+#     def forward(self, x):
+#         seq_len = x.shape[1]
+#         if seq_len != self.seq_len_cached:
+#             self.seq_len_cached = seq_len
+#             t = torch.arange(seq_len, device=x.device).type_as(self.inv_freq)
+#             freqs = torch.outer(t, self.inv_freq).to(x.device)
+#             self.cos_cached = freqs.cos()
+#             self.sin_cached = freqs.sin()
+#         return self.cos_cached[None, :, None, :], self.sin_cached[None, :, None, :]
+#
+#
+# def apply_rotary_emb(x, cos, sin):
+#     """Apply rotary embeddings."""
+#     assert x.ndim == 4  # multihead attention
+#     d = x.shape[3]//2
+#     x1 = x[..., :d]
+#     x2 = x[..., d:]
+#     y1 = x1 * cos + x2 * sin
+#     y2 = x1 * (-sin) + x2 * cos
+#     return torch.cat([y1, y2], 3)
 
 
 class CausalSelfComPoM(nn.Module):
@@ -82,6 +84,12 @@ class CausalSelfComPoM(nn.Module):
         # cos, sin = self.rotary(x)
         # x = apply_rotary_emb(x, cos, sin).view(B, T, C)
         return self.pom(x, x, mask)
+
+    def ar_forward(self, xq, state):
+        return self.pom.ar_forward(xq, state)
+
+    def reset(self, state):
+        return self.pom.reset(state)
 
 class CausalSelfAttention(nn.Module):
 
@@ -124,6 +132,45 @@ class CausalSelfAttention(nn.Module):
         # output projection
         y = self.c_proj(y)
         return y
+
+    def ar_forward(self, x, state):
+        B, T, C = x.size() # batch size, sequence length, embedding dimensionality (n_embd)
+        # calculate query, key, values for all heads in batch and move head forward to be the batch dim
+        qkv = self.c_attn(x)
+        q, k, v = qkv.split(self.n_embd, dim=2)
+        k = k.view(B, T, self.n_head, self.head_dim)
+        q = q.view(B, T, self.n_head, self.head_dim)
+        v = v.view(B, T, self.n_head, self.head_dim)
+        state['kv_cache'].to(x.device)
+        k, v = state['kv_cache'].update(k.transpose(1, 2).float(), v.transpose(1, 2).float())
+        k = k.transpose(1, 2)[:, 0:state['kv_cache'].size, :, :].to(x.dtype)
+        v = v.transpose(1, 2)[:, 0:state['kv_cache'].size, :, :].to(x.dtype)
+        full_n = state['n']+T
+        current_pos = state['n'] + torch.arange(0, T, dtype=torch.long, device=x.device)
+
+        if self.use_rope:
+            cos, sin = self.rotary.position_forward(current_pos, state['max_len'], device=q.device)
+            q = apply_rotary_emb(q, cos, sin)
+            cos, sin = self.rotary(k)
+            k = apply_rotary_emb(k, cos, sin)
+
+        context_window = self.context_window if self.context_window>0 else full_n
+        window_mask = torch.logical_xor(torch.ones(full_n, full_n, dtype=torch.bool).tril(diagonal=0),
+                                        torch.ones(full_n, full_n, dtype=torch.bool).tril(
+                                            diagonal=-context_window)).to(q.device)
+        window_mask = window_mask[full_n-T:full_n, :]
+        y = F.scaled_dot_product_attention(q.transpose(1, 2), k.transpose(1, 2), v.transpose(1, 2), is_causal=False, attn_mask=window_mask)
+        y = y.transpose(1, 2).contiguous().view(B, T, C) # re-assemble all head outputs side by side
+        # output projection
+        y = self.c_proj(y)
+        state['n'] = full_n
+        return y, state
+
+    def reset(self, state):
+        state['n'] = 0
+        state['kv_cache'] = KVCache(state['bs'], state['max_len'], self.n_head, self.head_dim, dtype=torch.float32)
+        return state
+
 
 class MLP(nn.Module):
     """Multi-layer perceptron block."""
@@ -178,6 +225,16 @@ class Block(nn.Module):
         x = x + self.attn_scale * self.attn(rmsnorm(x))
         x = x + self.mlp_scale * self.mlp(rmsnorm(x))
         return x
+
+    def ar_forward(self, x: torch.Tensor, state):
+        dx, state = self.attn.ar_forward(rmsnorm(x), state)
+        x = x + self.attn_scale * dx
+        x = x + self.mlp_scale * self.mlp(rmsnorm(x))
+        return x, state
+
+    def reset(self, state):
+        state = self.attn.reset(state)
+        return state
 
 
 class GPT(nn.Module):
@@ -260,6 +317,29 @@ class GPT(nn.Module):
             logits = None
 
         return logits, loss
+
+    def ar_forward(self, idx, state):
+        b, t = idx.size()
+        x = self.transformer.wte(idx)
+        if not self.use_rope:
+            pos = torch.arange(0, t, dtype=torch.long, device=idx.device) + state[0]['n']
+            pos_emb = self.transformer.wpe(pos).view(1, t, self.n_embd)
+            x = x + pos_emb
+
+        for l in range(len(self.transformer.h)):
+            x, s = self.transformer.h[l].ar_forward(x, state[l])
+            state[l] = s
+        x = rmsnorm(x)
+        logits = self.lm_head(x[:, [-1], :])  # note: using list [-1] to preserve the time dim
+        logits = logits.float()  # use tf32/fp32 for logits
+        return logits, state
+
+    def reset(self, batch_size):
+        state = []
+        for l in range(len(self.transformer.h)):
+            s = {'bs': batch_size, 'max_len': self.seq_length}
+            state.append(self.transformer.h[l].reset(s))
+        return state
 
     def configure_optimizers(self, weight_decay: float, learning_rate: float, betas: tuple, precondition_frequency: int =1):
         """

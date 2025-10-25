@@ -4,8 +4,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch._dynamo
 from typing import Optional, Tuple, Dict, Any
-
-from torch.nn import LayerNorm
+from models.rotary import Rotary, apply_rotary_emb
 
 
 # =============================================================================
@@ -159,10 +158,12 @@ def polynomial_selection_(s: torch.Tensor, h: torch.Tensor, n_sel_heads: int) ->
     """
     if s.ndim < 4:
         s = s.unsqueeze(-1)
-    orig_shape = h.shape
-    new_shape = (*h.shape[:-1], n_sel_heads, h.shape[-1] // n_sel_heads)
-    h = h.view(new_shape)
-    return (s * h).view(orig_shape)
+    b, t, n, ds = s.shape
+    _, g, dh = h.shape
+    assert g == 1 or t == 1 or g == t, print(f"b: {b} t: {t} n: {n} ds: {ds} g: {g} dh: {dh}")
+    h = h.view(b, g, n_sel_heads, dh//n_sel_heads)
+    # print(f"s: {s.shape} h: {h.shape}")
+    return (s * h).view(b, max(g,t), dh)
 
 
 # =============================================================================
@@ -195,38 +196,38 @@ def pom(xq: torch.Tensor, xc: torch.Tensor, coeff: torch.Tensor, k: int, n_sel_h
 # =============================================================================
 # ComPoM Module Class
 # =============================================================================
-
-class Rotary(torch.nn.Module):
-    """Rotary position embeddings."""
-
-    def __init__(self, dim, base=10000):
-        super().__init__()
-        inv_freq = 1.0 / (base ** (torch.arange(0, dim, 2).float() / dim))
-        self.register_buffer("inv_freq", inv_freq)
-        self.seq_len_cached = None
-        self.cos_cached = None
-        self.sin_cached = None
-
-    def forward(self, x):
-        seq_len = x.shape[1]
-        if seq_len != self.seq_len_cached:
-            self.seq_len_cached = seq_len
-            t = torch.arange(seq_len, device=x.device).type_as(self.inv_freq)
-            freqs = torch.outer(t, self.inv_freq).to(x.device)
-            self.cos_cached = freqs.cos()
-            self.sin_cached = freqs.sin()
-        return self.cos_cached[None, :, None, :], self.sin_cached[None, :, None, :]
-
-
-def apply_rotary_emb(x, cos, sin):
-    """Apply rotary embeddings."""
-    assert x.ndim == 4  # multihead attention
-    d = x.shape[3] // 2
-    x1 = x[..., :d]
-    x2 = x[..., d:]
-    y1 = x1 * cos + x2 * sin
-    y2 = x1 * (-sin) + x2 * cos
-    return torch.cat([y1, y2], 3)
+#
+# class Rotary(torch.nn.Module):
+#     """Rotary position embeddings."""
+#
+#     def __init__(self, dim, base=10000):
+#         super().__init__()
+#         inv_freq = 1.0 / (base ** (torch.arange(0, dim, 2).float() / dim))
+#         self.register_buffer("inv_freq", inv_freq)
+#         self.seq_len_cached = None
+#         self.cos_cached = None
+#         self.sin_cached = None
+#
+#     def forward(self, x):
+#         seq_len = x.shape[1]
+#         if seq_len != self.seq_len_cached:
+#             self.seq_len_cached = seq_len
+#             t = torch.arange(seq_len, device=x.device).type_as(self.inv_freq)
+#             freqs = torch.outer(t, self.inv_freq).to(x.device)
+#             self.cos_cached = freqs.cos()
+#             self.sin_cached = freqs.sin()
+#         return self.cos_cached[None, :, None, :], self.sin_cached[None, :, None, :]
+#
+#
+# def apply_rotary_emb(x, cos, sin):
+#     """Apply rotary embeddings."""
+#     assert x.ndim == 4  # multihead attention
+#     d = x.shape[3] // 2
+#     x1 = x[..., :d]
+#     x2 = x[..., d:]
+#     y1 = x1 * cos + x2 * sin
+#     y2 = x1 * (-sin) + x2 * cos
+#     return torch.cat([y1, y2], 3)
 
 
 def rmsnorm(x0, eps=1e-3):
@@ -371,3 +372,52 @@ class ComPoM(nn.Module):
 
         sh = polynomial_selection_(s, h, self.n_sel_heads)
         return self.ag_proj(sh), new_state
+
+    def ar_forward(self, xq, state):
+        # print(f"xq: {xq.shape}")
+        B, T, D = xq.size()
+        n_current = T
+        xc = xq
+        if self.n_groups > 1:
+            h = self.po_proj(xc.transpose(1, 2)).transpose(1, 2)
+        else:
+            h = self.po_proj(xc)
+        if self.layernorm:
+            b, n, d = h.shape
+            h = rmsnorm(h.view(b, n, self.n_sel_heads, -1)).view(b, n, d)
+
+        s = F.hardsigmoid(self.se_proj(xq), inplace=True)
+
+        h_past = state['h']
+        n_past = state['n']
+        current_pos = n_past + torch.arange(0, T, dtype=torch.long, device = xq.device)
+
+        if self.use_rope:
+            # handle S
+            b,n,l = s.shape
+            if self.n_sel_heads>1:
+                s = s.view(b, n, l, 1).expand((-1,-1,-1,self.head_dim))
+            else:
+                s = s.view(b, n, 1, l)
+            cos, sin = self.rotary.position_forward(current_pos, state['max_len'], device=xq.device)
+            s = apply_rotary_emb(s, cos, sin)
+            # handle H
+            h = einops.rearrange(h, 'b n (l d) -> b n l d', l=self.n_sel_heads)
+            cos, sin = self.rotary.position_forward(current_pos, state['max_len'], device=xq.device)
+            h = apply_rotary_emb(h, cos, sin)
+            h = einops.rearrange(h, 'b n l d -> b n (l d)')
+
+        h = polynomial_aggregation_(h, self.po_coeff, self.order)
+        h = n_past/(n_past + n_current) * h_past + n_current/(n_past + n_current) * h
+
+        state['h'] = h
+        state['n'] = n_past + n_current
+
+        sh = polynomial_selection_(s, h, self.n_sel_heads)
+        return self.ag_proj(sh), state
+
+    def reset(self, state):
+        state['h'] = 0
+        state['n'] = 0
+        return state
+
