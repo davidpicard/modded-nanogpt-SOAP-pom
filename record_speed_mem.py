@@ -52,7 +52,7 @@ def main(cfg: DictConfig):
             state = model.model.reset(batch_size=1)
             for pos in range(model.model.seq_length):
                 logits, state = model.model.ar_forward(idx=idx, state=state)
-                idx = logits.detach().argmax().view(1, 1)
+                idx = logits.detach().argmax(dim=-1).view(1, 1)
             # tokens = cb._sample_from_model(model, prompt, generator, "cuda")
             # tokens = tokens[0].cpu().numpy()
             n_tokens += model.model.seq_length
@@ -72,7 +72,7 @@ def main(cfg: DictConfig):
             state = model.model.reset(batch_size=1)
             for pos in range(model.model.seq_length):
                 logits, state = model.model.ar_forward(idx=idx, state=state)
-                idx = logits.detach().argmax().view(1, 1)
+                idx = logits.detach().argmax(dim=-1).view(1, 1)
             # tokens = cb._sample_from_model(model, prompt, generator, "cuda")
             # tokens = tokens[0].cpu().numpy()
             n_tokens += model.model.seq_length
