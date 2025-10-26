@@ -136,35 +136,59 @@ class CausalSelfAttention(nn.Module):
     @torch.no_grad
     def ar_forward(self, x, state):
         B, T, D = x.shape
-        if 'x_pred' in state:
-            N = state['n']
-            state['x_pred'][:, N:N+T, :] = x
-            state['n'] = N+T
-            x = state['x_pred'][:, 0:N+T, :]
-        else:
-            # print(f" MHA allocating x cache")
-            state['x_pred'] = torch.zeros((B, state['max_len'], self.n_embd), dtype=x.dtype).to(x.device)
-            state['x_pred'][:, 0:T, :] = x
-            state['n'] = T
-        _, N, _ = x.shape
+        # if 'x_pred' in state:
+        #     N = state['n']
+        #     state['x_pred'][:, N:N+T, :] = x
+        #     state['n'] = N+T
+        #     x = state['x_pred'][:, 0:N+T, :]
+        # else:
+        #     # print(f" MHA allocating x cache")
+        #     state['x_pred'] = torch.zeros((B, state['max_len'], self.n_embd), dtype=x.dtype).to(x.device)
+        #     state['x_pred'][:, 0:T, :] = x
+        #     state['n'] = T
+        # _, N, _ = x.shape
         # calculate query, key, values for all heads in batch and move head forward to be the batch dim
         qkv = self.c_attn(x)
         q, k, v = qkv.split(self.n_embd, dim=2)
-        k = k.view(B, N, self.n_head, self.head_dim)
-        q = q.view(B, N, self.n_head, self.head_dim)
-        v = v.view(B, N, self.n_head, self.head_dim)
+        k = k.view(B, T, self.n_head, self.head_dim)
+        q = q.view(B, T, self.n_head, self.head_dim)
+        v = v.view(B, T, self.n_head, self.head_dim)
+        if 'kv_cache' in state:
+            state = deepcopy(state)
+            k, v = state['kv_cache'].update(k.transpose(1,2), v.transpose(1,2))
+            N = state['kv_cache'].size
+            k = k[:, :, 0:N, :].transpose(1,2)
+            v = v[:, :, 0:N, :].transpose(1,2)
+            state['n'] = N
+        else:
+            state['kv_cache'] = KVCache(batch_size=B, max_seq_len=state['max_len'], num_kv_heads=self.n_head, head_dim=self.head_dim, dtype=x.dtype).to(x.device)
+            k = k.transpose(1, 2)
+            v = v.transpose(1, 2)
+            k, v = state['kv_cache'].update(k, v)
+            k = k[:, :, 0:T, :].transpose(1,2)
+            v = v[:, :, 0:T, :].transpose(1,2)
+            state['n'] = T
+            N = T
+        # print(f" MHA: k{k.shape} v: {v.shape}")
         if self.use_rope:
-            cos, sin = self.rotary(q)
+            current_pos = torch.arange(N-T, N, dtype=torch.long, device=q.device)
+            cos, sin = self.rotary.position_forward(current_pos, state['max_len'], device=q.device)
             q = apply_rotary_emb(q, cos, sin)
+            cos, sin = self.rotary(k)
             k = apply_rotary_emb(k, cos, sin)
-        if self.context_window > 0 and N > self.context_window:
-            q = q[:, N-self.context_window:N, :]
-            k = k[:, N-self.context_window:N, :]
-            v = v[:, N-self.context_window:N, :]
-            N = self.context_window
-        y = F.scaled_dot_product_attention(q.transpose(1, 2), k.transpose(1, 2), v.transpose(1, 2), is_causal=True)
-        # print(f" MHA y: {y.shape} T: {T} N: {N}")
-        y = y[:,:,N-T:N,:]
+        # if self.context_window > 0 and N > self.context_window:
+        #     q = q[:, N-self.context_window:N, :]
+        #     k = k[:, N-self.context_window:N, :]
+        #     v = v[:, N-self.context_window:N, :]
+        #     N = self.context_window
+
+        if self.context_window > 0:
+            window_mask = torch.logical_xor(torch.ones(N, N, dtype=torch.bool).tril(diagonal=0), torch.ones(N, N, dtype=torch.bool).tril(diagonal=-self.context_window)).to(q.device)
+        else:
+            window_mask = torch.ones(N, N, dtype=torch.bool).tril(diagonal=0).to(q.device)
+        window_mask = window_mask[N-T:N, :]
+        y = F.scaled_dot_product_attention(q.transpose(1, 2), k.transpose(1, 2), v.transpose(1, 2), attn_mask=window_mask)
+        # print(f" MHA y: {y.shape} T: {T} N: {N} mask: {window_mask}")
         y = y.transpose(1, 2).contiguous().view(B, T, D) # re-assemble all head outputs side by side
         # output projection
         y = self.c_proj(y)
