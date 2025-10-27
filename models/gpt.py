@@ -79,7 +79,7 @@ class CausalSelfComPoM(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         B, T, C = x.size()
-        mask = torch.tril(torch.ones((T, T))).unsqueeze(0)
+        mask = torch.tril(torch.ones(T, T, dtype=torch.bool)).unsqueeze(0)
         # x = x.view(B, T, 1, C)
         # cos, sin = self.rotary(x)
         # x = apply_rotary_emb(x, cos, sin).view(B, T, C)
@@ -127,6 +127,7 @@ class CausalSelfAttention(nn.Module):
             # print("***** using windowed mask!!!")
             y = F.scaled_dot_product_attention(q.transpose(1, 2), k.transpose(1, 2), v.transpose(1, 2), is_causal=False, attn_mask=window_mask)
         else:
+            # mask = torch.tril(torch.ones((T, T))).unsqueeze(0).to(q.device)
             y = F.scaled_dot_product_attention(q.transpose(1, 2), k.transpose(1, 2), v.transpose(1, 2), is_causal=True)
         y = y.transpose(1, 2).contiguous().view(B, T, C) # re-assemble all head outputs side by side
         # output projection
@@ -135,6 +136,11 @@ class CausalSelfAttention(nn.Module):
 
     @torch.no_grad
     def ar_forward(self, x, state):
+        return self.ar_forward_kv(x, state)
+
+    @torch.no_grad
+    def ar_forward_x(self, x, state):
+        state = deepcopy(state)
         B, T, D = x.shape
         if 'x_pred' in state:
             N = state['n']
@@ -170,39 +176,50 @@ class CausalSelfAttention(nn.Module):
         y = self.c_proj(y)
         return y, state
 
-    def ar_forward2(self, x, state):
-        B, T, C = x.size() # batch size, sequence length, embedding dimensionality (n_embd)
+    @torch.no_grad
+    def ar_forward_kv(self, x, state):
+        state = deepcopy(state)
+        B, T, D = x.shape
         # calculate query, key, values for all heads in batch and move head forward to be the batch dim
         qkv = self.c_attn(x)
         q, k, v = qkv.split(self.n_embd, dim=2)
-        k = k.view(B, T, self.n_head, self.head_dim)
         q = q.view(B, T, self.n_head, self.head_dim)
+        k = k.view(B, T, self.n_head, self.head_dim)
         v = v.view(B, T, self.n_head, self.head_dim)
-        if 'kv_cache' not in state:
-            state['kv_cache'] = KVCache(B, state['max_len'], self.n_head, self.head_dim, dtype=k.dtype)
-            state['kv_cache'].to(x.device)
-        k, v = state['kv_cache'].update(k.transpose(1, 2), v.transpose(1, 2))
-        k = k.transpose(1, 2)[:, 0:state['kv_cache'].size, :, :]
-        v = v.transpose(1, 2)[:, 0:state['kv_cache'].size, :, :]
-        full_n = state['n']+T
-        current_pos = state['n'] + torch.arange(0, T, dtype=torch.long, device=x.device)
-
+        if 'kv_cache' in state:
+            N = state['n']
+            state['kv_cache'][0, :, N:N + T, :, :] = k.unsqueeze(0)
+            state['kv_cache'][1, :, N:N + T, :, :] = v.unsqueeze(0)
+            k = state['kv_cache'][0, :, 0:N + T, :, :]
+            v = state['kv_cache'][1, :, 0:N + T, :, :]
+            N = N+T
+            state['n'] = N
+        else:
+            # print(f" MHA allocating x cache")
+            state['kv_cache'] = torch.zeros((2, B, state['max_len'], self.n_head, self.head_dim), dtype=q.dtype).to(q.device)
+            state['kv_cache'][0, :, 0:T, :, :] = k.unsqueeze(0)
+            state['kv_cache'][1, :, 0:T, :, :] = v.unsqueeze(0)
+            state['n'] = T
+            N = T
         if self.use_rope:
+            current_pos = torch.arange(N-T, N, dtype=torch.long, device = q.device)
             cos, sin = self.rotary.position_forward(current_pos, state['max_len'], device=q.device)
             q = apply_rotary_emb(q, cos, sin)
-            cos, sin = self.rotary(k)
+            current_pos = torch.arange(0, N, dtype=torch.long, device = k.device)
+            cos, sin = self.rotary.position_forward(current_pos, state['max_len'], device=k.device)
+            # print(f" MHA k: {k.shape} cos: {cos.shape} sin: {sin.shape}")
             k = apply_rotary_emb(k, cos, sin)
-
-        context_window = self.context_window if self.context_window>0 else full_n
-        window_mask = torch.logical_xor(torch.ones(full_n, full_n, dtype=torch.bool).tril(diagonal=0),
-                                        torch.ones(full_n, full_n, dtype=torch.bool).tril(
-                                            diagonal=-context_window)).to(q.device)
-        window_mask = window_mask[full_n-T:full_n, :]
-        y = F.scaled_dot_product_attention(q.transpose(1, 2), k.transpose(1, 2), v.transpose(1, 2), is_causal=False, attn_mask=window_mask)
-        y = y.transpose(1, 2).contiguous().view(B, T, C) # re-assemble all head outputs side by side
+        if self.context_window > 0 and N > self.context_window:
+            k = k[:, N - self.context_window:N, :, :]
+            v = v[:, N - self.context_window:N, :, :]
+            N = self.context_window
+        mask = torch.ones(N, N, dtype=torch.bool).tril(diagonal=0)[N-T:N, :].unsqueeze(0).to(q.device)
+        # print(f" MHA q: {q.shape} k: {k.shape} v: {v.shape} m: {mask}")
+        y = F.scaled_dot_product_attention(q.transpose(1, 2), k.transpose(1, 2), v.transpose(1, 2), attn_mask=mask)
+        # print(f" MHA y: {y.shape} T: {T} N: {N}")
+        y = y.transpose(1, 2).contiguous().view(B, T, D)  # re-assemble all head outputs side by side
         # output projection
         y = self.c_proj(y)
-        state['n'] = full_n
         return y, state
 
     def reset(self, state):
