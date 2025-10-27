@@ -278,7 +278,8 @@ class Block(nn.Module):
 
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        x = x + self.attn_scale * self.attn(rmsnorm(x))
+        dx = self.attn(rmsnorm(x))
+        x = x + self.attn_scale * dx
         x = x + self.mlp_scale * self.mlp(rmsnorm(x))
         return x
 
