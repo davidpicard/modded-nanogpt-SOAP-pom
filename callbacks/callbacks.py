@@ -65,6 +65,7 @@ class TextGenerationCallback(pl.Callback):
         model.train()
         return tokens
 
+    @torch.no_grad
     def _generate_samples(
         self,
         pl_module: pl.LightningModule,

@@ -115,7 +115,8 @@ class HellaSwagCallback(pl.Callback):
             # TODO: evaluate
             model = pl_module.model
             model.eval()
-            res = self.evaluate(model, device=pl_module.device)
+            with torch.no_grad():
+                res = self.evaluate(model, device=pl_module.device)
             model.train()
 
             hs_table = wandb.Table(
