@@ -6,7 +6,7 @@ defaults:
 vocab_size: 50257
 seq_length: ${training.sequence_length}
 n_layer: 12
-n_head: 1
+n_head: 24
 n_groups: 1
 degree: 2
 expand: 2
