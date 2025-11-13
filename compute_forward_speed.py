@@ -32,7 +32,9 @@ def main(cfg: DictConfig):
     model.eval()
 
     for sl in [256, 512, 1024, 2048, 4096, 8192, 16384, 65536]:
-        bs = 65536//sl
+        bs = 16384//sl
+        if bs <= 0:
+            bs = 1
         with torch.no_grad():
             with torch.autocast(device_type="cuda", dtype=torch.float32):
                 cb = TextGenerationCallback(max_new_tokens=model.model.seq_length//2-1, every_n_steps=1, num_unconditional=cfg.evaluation.num_unconditional_samples)
