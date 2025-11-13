@@ -53,8 +53,7 @@ def main(cfg: DictConfig):
                 idx = torch.randint(0, model.model.vocab_size, size=(bs, sl), generator=generator, device="cuda")
 
                 state = model.model.reset(batch_size=bs)
-                for j in range(sl-1):
-                    logits, state = model.model.ar_forward(idx=idx[:,j:j+1], state=state)
+                logits, state = model.model.ar_forward(idx=idx[:,0:sl-1], state=state)
                 start_loop_time = time.perf_counter()
                 for i in tqdm(range(cb.num_unconditional)):
                     logits, state = model.model.ar_forward(idx=idx[:,sl-1:sl], state=state)
@@ -71,8 +70,7 @@ def main(cfg: DictConfig):
                 idx = torch.randint(0, model.model.vocab_size, size=(bs, sl), generator=generator, device="cuda")
 
                 state = model.model.reset(batch_size=bs)
-                for j in range(sl-1):
-                    logits, state = model.model.ar_forward(idx=idx[:,j:j+1], state=state)
+                logits, state = model.model.ar_forward(idx=idx[:, 0:sl-1], state=state)
                 start_loop_time = time.perf_counter()
                 for i in tqdm(range(cb.num_unconditional)):
                     logits, state = model.model.ar_forward(idx=idx[:,sl-1:sl], state=state)
