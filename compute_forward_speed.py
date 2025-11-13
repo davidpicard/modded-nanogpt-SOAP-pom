@@ -31,7 +31,7 @@ def main(cfg: DictConfig):
         model.model.compile()
     model.eval()
 
-    for sl in [256, 512, 1024, 2048, 4096, 8192, 16384, 65536]:
+    for sl in [256, 512, 1024, 2048, 4096, 8192, 16384, 32768, 65536]:
         bs = 1024//sl
         if bs <= 0:
             bs = 1
@@ -54,7 +54,9 @@ def main(cfg: DictConfig):
 
                 start_loop_time = time.perf_counter()
                 for i in tqdm(range(cb.num_unconditional)):
-                    logits, _ = model.model(idx)
+                    state = model.model.reset(batch_size=bs)
+                    for j in range(sl):
+                        logits, state = model.model.ar_forward(idx=idx[:,j:j+1], state=state)
                 end_loop_time = time.perf_counter()
                 elapsed_loop_time = end_loop_time - start_loop_time
                 print(f"1st pass: {bs}x{sl}={n_tokens}tokens in {elapsed_loop_time}s, speed: {cb.num_unconditional*n_tokens/elapsed_loop_time} max mem: {torch.cuda.max_memory_allocated()}")
@@ -69,7 +71,9 @@ def main(cfg: DictConfig):
 
                 start_loop_time = time.perf_counter()
                 for i in tqdm(range(cb.num_unconditional)):
-                    logits, _ = model.model(idx)
+                    state = model.model.reset(batch_size=bs)
+                    for j in range(sl):
+                        logits, state = model.model.ar_forward(idx=idx[:,j:j+1], state=state)
                 end_loop_time = time.perf_counter()
                 elapsed_loop_time = end_loop_time - start_loop_time
                 print(f"2nd pass: {bs}x{sl}={n_tokens}tokens in {elapsed_loop_time}s, speed: {cb.num_unconditional*n_tokens/elapsed_loop_time} max mem: {torch.cuda.max_memory_allocated()}")
