@@ -63,6 +63,7 @@ class RMSNorm(nn.Module):
 #     return torch.cat([y1, y2], 3)
 
 
+
 class CausalSelfComPoM(nn.Module):
     """Causal self-attention using Polynomial Mixer."""
 
@@ -90,6 +91,146 @@ class CausalSelfComPoM(nn.Module):
 
     def reset(self, state):
         return self.pom.reset(state)
+
+
+
+class CausalSelfPerformer(nn.Module):
+    def __init__(self, n_embd, degree, expand, n_head, use_rope: bool = True, context_window=-1, **kwargs):
+        super().__init__()
+        self.degree = degree
+        self.expand = expand
+        self.n_head = n_head
+        self.n_embd = n_embd
+        self.head_dim = self.n_embd // self.n_head
+        assert self.n_embd % self.n_head == 0
+        # key, query, value projections for all heads, but in a batch
+        self.c_attn = nn.Linear(self.n_embd, 3 * self.n_embd, bias=False)
+        # output projection
+        self.c_proj = nn.Linear(self.n_embd, self.n_embd, bias=False)
+        self.use_rope = use_rope
+        if use_rope:
+            self.rotary = Rotary(self.head_dim)
+        self.context_window = context_window
+        from performer_pytorch import FastAttention
+        self.att_fct = FastAttention(dim_heads=self.head_dim,
+                                     nb_features=None,
+                                     causal=True)
+    def forward(self, x):
+        B, T, C = x.size() # batch size, sequence length, embedding dimensionality (n_embd)
+        # calculate query, key, values for all heads in batch and move head forward to be the batch dim
+        qkv = self.c_attn(x)
+        q, k, v = qkv.split(self.n_embd, dim=2)
+        k = k.view(B, T, self.n_head, self.head_dim)
+        q = q.view(B, T, self.n_head, self.head_dim)
+        v = v.view(B, T, self.n_head, self.head_dim)
+        if self.use_rope:
+            cos, sin = self.rotary(q)
+            q = apply_rotary_emb(q, cos, sin)
+            k = apply_rotary_emb(k, cos, sin)
+        if self.context_window > 0:
+            window_mask = torch.logical_xor(torch.ones(T, T, dtype=torch.bool).tril(diagonal=0), torch.ones(T, T, dtype=torch.bool).tril(diagonal=-self.context_window)).to(q.device)
+            # print("***** using windowed mask!!!")
+            y = self.att_fct(q.transpose(1, 2), k.transpose(1, 2), v.transpose(1, 2))
+        else:
+            # mask = torch.tril(torch.ones((T, T))).unsqueeze(0).to(q.device)
+            y = self.att_fct(q.transpose(1, 2), k.transpose(1, 2), v.transpose(1, 2))
+        y = y.transpose(1, 2).contiguous().view(B, T, C) # re-assemble all head outputs side by side
+        # output projection
+        y = self.c_proj(y)
+        return y
+
+    @torch.no_grad
+    def ar_forward(self, x, state):
+        return self.ar_forward_kv(x, state)
+
+    @torch.no_grad
+    def ar_forward_x(self, x, state):
+        state = deepcopy(state)
+        B, T, D = x.shape
+        if 'x_pred' in state:
+            N = state['n']
+            state['x_pred'][:, N:N+T, :] = x
+            state['n'] = N+T
+            x = state['x_pred'][:, 0:N+T, :]
+        else:
+            # print(f" MHA allocating x cache")
+            state['x_pred'] = torch.zeros((B, state['max_len'], self.n_embd), dtype=x.dtype).to(x.device)
+            state['x_pred'][:, 0:T, :] = x
+            state['n'] = T
+        _, N, _ = x.shape
+        # calculate query, key, values for all heads in batch and move head forward to be the batch dim
+        qkv = self.c_attn(x)
+        q, k, v = qkv.split(self.n_embd, dim=2)
+        k = k.view(B, N, self.n_head, self.head_dim)
+        q = q.view(B, N, self.n_head, self.head_dim)
+        v = v.view(B, N, self.n_head, self.head_dim)
+        if self.use_rope:
+            cos, sin = self.rotary(q)
+            q = apply_rotary_emb(q, cos, sin)
+            k = apply_rotary_emb(k, cos, sin)
+        if self.context_window > 0 and N > self.context_window:
+            q = q[:, N-self.context_window:N, :]
+            k = k[:, N-self.context_window:N, :]
+            v = v[:, N-self.context_window:N, :]
+            N = self.context_window
+        y = self.att_fct(q.transpose(1, 2), k.transpose(1, 2), v.transpose(1, 2))
+        # print(f" MHA y: {y.shape} T: {T} N: {N}")
+        y = y[:,:,N-T:N,:]
+        y = y.transpose(1, 2).contiguous().view(B, T, D) # re-assemble all head outputs side by side
+        # output projection
+        y = self.c_proj(y)
+        return y, state
+
+    @torch.no_grad
+    def ar_forward_kv(self, x, state):
+        state = deepcopy(state)
+        B, T, D = x.shape
+        # calculate query, key, values for all heads in batch and move head forward to be the batch dim
+        qkv = self.c_attn(x)
+        q, k, v = qkv.split(self.n_embd, dim=2)
+        q = q.view(B, T, self.n_head, self.head_dim)
+        k = k.view(B, T, self.n_head, self.head_dim)
+        v = v.view(B, T, self.n_head, self.head_dim)
+        if 'kv_cache' in state:
+            N = state['n']
+            state['kv_cache'][0, :, N:N + T, :, :] = k.unsqueeze(0)
+            state['kv_cache'][1, :, N:N + T, :, :] = v.unsqueeze(0)
+            k = state['kv_cache'][0, :, 0:N + T, :, :]
+            v = state['kv_cache'][1, :, 0:N + T, :, :]
+            N = N+T
+            state['n'] = N
+        else:
+            # print(f" MHA allocating x cache")
+            state['kv_cache'] = torch.zeros((2, B, state['max_len'], self.n_head, self.head_dim), dtype=q.dtype).to(q.device)
+            state['kv_cache'][0, :, 0:T, :, :] = k.unsqueeze(0)
+            state['kv_cache'][1, :, 0:T, :, :] = v.unsqueeze(0)
+            state['n'] = T
+            N = T
+        if self.use_rope:
+            current_pos = torch.arange(N-T, N, dtype=torch.long, device = q.device)
+            cos, sin = self.rotary.position_forward(current_pos, state['max_len'], device=q.device)
+            q = apply_rotary_emb(q, cos, sin)
+            current_pos = torch.arange(0, N, dtype=torch.long, device = k.device)
+            cos, sin = self.rotary.position_forward(current_pos, state['max_len'], device=k.device)
+            # print(f" MHA k: {k.shape} cos: {cos.shape} sin: {sin.shape}")
+            k = apply_rotary_emb(k, cos, sin)
+        if self.context_window > 0 and N > self.context_window:
+            k = k[:, N - self.context_window:N, :, :]
+            v = v[:, N - self.context_window:N, :, :]
+            N = self.context_window
+        mask = torch.ones(N, N, dtype=torch.bool).tril(diagonal=0)[N-T:N, :].unsqueeze(0).to(q.device)
+        # print(f" MHA q: {q.shape} k: {k.shape} v: {v.shape} m: {mask}")
+        y = self.att_fct(q.transpose(1, 2), k.transpose(1, 2), v.transpose(1, 2))
+        # print(f" MHA y: {y.shape} T: {T} N: {N}")
+        y = y.transpose(1, 2).contiguous().view(B, T, D)  # re-assemble all head outputs side by side
+        # output projection
+        y = self.c_proj(y)
+        return y, state
+
+    def reset(self, state):
+        state['n'] = 0
+        self.rotary.forward(torch.arange(0, state['max_len'], dtype=torch.long).unsqueeze(0).to(self.rotary.inv_freq.device))
+        return state
 
 class CausalSelfAttention(nn.Module):
 
