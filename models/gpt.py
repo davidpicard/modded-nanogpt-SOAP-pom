@@ -111,10 +111,13 @@ class CausalSelfPerformer(nn.Module):
         if use_rope:
             self.rotary = Rotary(self.head_dim)
         self.context_window = context_window
-        from performer_pytorch import FastAttention
-        self.att_fct = FastAttention(dim_heads=self.head_dim,
-                                     nb_features=None,
-                                     causal=True)
+        # from performer_pytorch import FastAttention
+        # self.att_fct = FastAttention(dim_heads=self.head_dim,
+        #                              nb_features=None,
+        #                              causal=True)
+        from torch_geometric.nn.attention.performer import PerformerProjection
+        self.att_fct = PerformerProjection(num_cols=self.head_dim)
+
     def forward(self, x):
         B, T, C = x.size() # batch size, sequence length, embedding dimensionality (n_embd)
         # calculate query, key, values for all heads in batch and move head forward to be the batch dim
