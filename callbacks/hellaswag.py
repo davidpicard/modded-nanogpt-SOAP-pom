@@ -242,4 +242,6 @@ class HellaSwagCallback(pl.Callback):
             'samples': samples
         }
 
+        print(f"acc_norm: {num_correct_norm/num_total} acc: {num_correct/num_total}")
+
         return res
