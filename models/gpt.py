@@ -629,7 +629,7 @@ class GPT(nn.Module):
 class Mamba(nn.Module):
     def __init__(self, mixing_layer, vocab_size: int = 50257, seq_length: int = 1024, n_layer: int = 12, n_head: int = 12, n_embd: int = 768, use_rope: bool = True, hybrid: int = 0,
                  context_window: int = -1, verbose=False):
-        from mambapy.lm import LM, MambaConfig
+        from mambapy.mamba import MambaConfig, Mamba
         super().__init__()
         self.vocab_size = vocab_size
         self.seq_length = seq_length
@@ -641,8 +641,14 @@ class Mamba(nn.Module):
         self.hybrid = hybrid
         self.verbose = verbose
         print(f"Model is a Mamba({n_embd}, {n_layer})")
-        config = MambaConfig(d_model=n_embd, n_layers=n_layer)  # core model
-        self.model = LM(config, vocab_size=vocab_size)  # encapsulate it in a LM
+
+        config = MambaConfig(d_model=n_embd, n_layers=n_layer)
+        self.transformer = nn.ModuleDict(dict(
+                wte=nn.Embedding(self.vocab_size, self.n_embd),
+                h=Mamba(config),
+            ))
+        self.lm_head = nn.Linear(self.n_embd, self.vocab_size, bias=False)
+        self.transformer.wte.weight = self.lm_head.weight  # weight tying
 
     def forward(self, idx: torch.Tensor, targets: torch.Tensor = None, return_logits: bool = True):
         """
@@ -657,15 +663,19 @@ class Mamba(nn.Module):
             Tuple of (logits, loss) if targets provided, else just logits
         """
         b, t = idx.size()
+        x = self.transformer.wte(idx)  # token embeddings of shape (b, t, n_embd)
 
-        logits = self.model(idx)
+        x = self.transformer.h(x)
+        x = rmsnorm(x)
 
         if targets is not None:
             # if we are given some desired targets also calculate the loss
+            logits = self.lm_head(x)
             logits = logits.float()  # use tf32/fp32 for logits
             loss = F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1), ignore_index=-1, reduction='none')
         else:
             # inference-time mini-optimization: only forward the lm_head on the very last position
+            logits = self.lm_head(x[:, [-1], :])  # note: using list [-1] to preserve the time dim
             logits = logits.float()  # use tf32/fp32 for logits
             loss = None
 
@@ -674,6 +684,22 @@ class Mamba(nn.Module):
             logits = None
 
         return logits, loss
+
+    @torch.no_grad
+    def ar_forward(self, idx, state):
+        b, t = idx.size()
+        x = self.transformer.wte(idx)
+        x = x[:,0,:]
+        # print(f"x: {x.shape}")
+        x, state = self.transformer.h.step(x, state)
+        x = rmsnorm(x)
+        logits = self.lm_head(x[:, :])  # note: using list [-1] to preserve the time dim
+        logits = logits.float()  # use tf32/fp32 for logits
+        return logits, state
+
+    def reset(self, batch_size):
+        state = [(None, torch.zeros(batch_size, self.transformer.h.config.d_inner, self.transformer.h.config.d_conv-1).to("cuda")) for l in range(self.n_layer)]
+        return state
 
     def configure_optimizers(self, weight_decay: float, learning_rate: float, betas: tuple,
                              precondition_frequency: int = 1):
@@ -690,22 +716,16 @@ class Mamba(nn.Module):
         """
         from torch.optim import AdamW
         optimizer = AdamW([{
-            'params': self.model.lm_head.parameters(),
+            'params': self.lm_head.parameters(),
             'lr': learning_rate,
             'betas': betas,
             'weight_decay': 0
         },
-        {
-            'params': self.model.embedding.parameters(),
-            'lr': learning_rate,
-            'betas': betas,
-            'weight_decay': 0
-        },
-        {
-            'params': self.model.mamba.parameters(),
-            'lr': learning_rate,
-            'betas': betas,
-            'weight_decay': weight_decay
-        }])
+            {
+                'params': self.transformer.h.parameters(),
+                'lr': learning_rate,
+                'betas': betas,
+                'weight_decay': weight_decay
+            }])
 
         return optimizer
