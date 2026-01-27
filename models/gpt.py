@@ -624,3 +624,88 @@ class GPT(nn.Module):
             }])
         
         return optimizer
+
+
+class Mamba(nn.Module):
+    def __init__(self, mixing_layer, vocab_size: int = 50257, seq_length: int = 1024, n_layer: int = 12, n_head: int = 12, n_embd: int = 768, use_rope: bool = True, hybrid: int = 0,
+                 context_window: int = -1, verbose=False):
+        from mambapy.lm import LM, MambaConfig
+        super().__init__()
+        self.vocab_size = vocab_size
+        self.seq_length = seq_length
+        self.n_layer = n_layer
+        self.n_head = n_head
+        self.n_embd = n_embd
+        self.head_dim = self.n_embd // self.n_head
+        self.use_rope = use_rope
+        self.hybrid = hybrid
+        self.verbose = verbose
+        print(f"Model is a Mamba({n_embd}, {n_layer})")
+        config = MambaConfig(d_model=n_embd, n_layers=n_layer)  # core model
+        self.model = LM(config, vocab_size=vocab_size)  # encapsulate it in a LM
+
+    def forward(self, idx: torch.Tensor, targets: torch.Tensor = None, return_logits: bool = True):
+        """
+        Forward pass of the GPT model.
+
+        Args:
+            idx: Input token indices of shape (batch, seq_len)
+            targets: Target token indices for loss computation
+            return_logits: Whether to return logits
+
+        Returns:
+            Tuple of (logits, loss) if targets provided, else just logits
+        """
+        b, t = idx.size()
+
+        logits = self.model(idx)
+
+        if targets is not None:
+            # if we are given some desired targets also calculate the loss
+            logits = logits.float()  # use tf32/fp32 for logits
+            loss = F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1), ignore_index=-1, reduction='none')
+        else:
+            # inference-time mini-optimization: only forward the lm_head on the very last position
+            logits = logits.float()  # use tf32/fp32 for logits
+            loss = None
+
+        # there are performance reasons why not returning logits is prudent, if not needed
+        if not return_logits:
+            logits = None
+
+        return logits, loss
+
+    def configure_optimizers(self, weight_decay: float, learning_rate: float, betas: tuple,
+                             precondition_frequency: int = 1):
+        """
+        Configure optimizers for the model.
+
+        Args:
+            weight_decay: Weight decay coefficient
+            learning_rate: Learning rate
+            betas: Adam betas
+
+        Returns:
+            Combined optimizer
+        """
+        from torch.optim import AdamW
+        optimizer = AdamW([{
+            'params': self.model.lm_head.parameters(),
+            'lr': learning_rate,
+            'betas': betas,
+            'weight_decay': 0
+        },
+        {
+            'params': self.model.embedding.parameters(),
+            'lr': learning_rate,
+            'betas': betas,
+            'weight_decay': 0
+        },
+        {
+            'params': self.model.mamba.parameters(),
+            'lr': learning_rate,
+            'betas': betas,
+            'weight_decay': weight_decay
+        }])
+
+        return optimizer
